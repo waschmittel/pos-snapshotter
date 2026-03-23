@@ -48,10 +48,10 @@ public class SnapshotterFrame extends JFrame {
             }
         });
 
-        grabber = new OpenCVFrameGrabber(0);
+        grabber = new OpenCVFrameGrabber(0); // TODO: allow capturing from another device
         grabber.setImageWidth(768);
         grabber.setImageHeight(512);
-        grabber.start();
+        grabber.start(); // TODO: release in finally?
         log.info("Webcam started: {}x{}", grabber.getImageWidth(), grabber.getImageHeight());
 
         cameraPanel = new CameraPanel();
@@ -83,7 +83,7 @@ public class SnapshotterFrame extends JFrame {
     }
 
     private void startCameraLoop() {
-        Thread.ofVirtual().name("camera-loop").start(() -> {
+        Thread.ofPlatform().name("camera-loop").start(() -> {
             while (running.get()) {
                 try {
                     Frame frame = grabber.grab();
@@ -91,15 +91,15 @@ public class SnapshotterFrame extends JFrame {
                         BufferedImage image = converter.convert(frame);
                         if (image != null) {
                             // make a copy since the converter reuses the buffer
-                            BufferedImage copy = new BufferedImage(
-                                    image.getWidth(), image.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
+                            BufferedImage copy = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
                             copy.getGraphics().drawImage(image, 0, 0, null);
-                            cameraPanel.updateImage(copy);
+                            cameraPanel.updateImage(copy); // TODO: update async
                         }
                     }
                     // TODO: irgendwas macht mords CPU-Load ... unde es scheint weder der dithering-loop zu sein noch dieser.
                     Thread.sleep(2000); // ~5 fps
                 } catch (InterruptedException e) {
+                    log.warn("Camera loop interrupted");
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
@@ -117,10 +117,10 @@ public class SnapshotterFrame extends JFrame {
                     if (image != null) {
                         BufferedImage dithered = Dithering.toDitheredImage(image);
                         previewPanel.updateImage(dithered);
-                    } else {
-                        Thread.sleep(2000);
                     }
+                    Thread.sleep(500);
                 } catch (InterruptedException e) {
+                    log.warn("Dithering loop interrupted");
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {

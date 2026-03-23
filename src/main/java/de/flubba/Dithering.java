@@ -118,9 +118,11 @@ public class Dithering {
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                Color c = new Color(image.getRGB(x, y));
-                var gray = (0.6 * c.getRed() + 0.2 * c.getGreen() + 0.2 * c.getBlue()); // TODO: maybe make the grayscale weights adjustable
-                pixels[y][x] = gray / 255.0;
+                int rgb = image.getRGB(x, y);
+                int r = (rgb >> 16) & 0xFF;
+                int g = (rgb >>  8) & 0xFF;
+                int b =  rgb        & 0xFF;
+                pixels[y][x] = (0.6 * r + 0.2 * g + 0.2 * b) / 255.0; // TODO: maybe make the grayscale weights adjustable
             }
         }
         writeDebugImage(pixels, "converted_to_grayscale");

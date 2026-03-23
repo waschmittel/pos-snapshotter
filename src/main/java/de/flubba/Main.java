@@ -14,7 +14,7 @@ import java.util.List;
 public class Main {
     static void main() {
         try {
-            javax.swing.UIManager.setLookAndFeel(javax.swing.UIManager.getSystemLookAndFeelClassName());
+            //javax.swing.UIManager.setLookAndFeel(javax.swing.UIManager.getSystemLookAndFeelClassName());
         } catch (Exception ignored) {
         }
 
