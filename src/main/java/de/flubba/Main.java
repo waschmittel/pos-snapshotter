@@ -1,8 +1,6 @@
 package de.flubba;
 
 import com.github.anastaciocintra.escpos.EscPos;
-import com.github.anastaciocintra.escpos.image.Bitonal;
-import com.github.anastaciocintra.escpos.image.BitonalThreshold;
 import com.github.anastaciocintra.escpos.image.CoffeeImageImpl;
 import com.github.anastaciocintra.escpos.image.EscPosImage;
 import com.github.anastaciocintra.output.PrinterOutputStream;
@@ -51,8 +49,7 @@ public class Main {
     }
 
     private static void printLogoGraphicsImage(EscPos escpos, BufferedImage chunk) throws IOException {
-        Bitonal algorithm = new BitonalThreshold(1);
-        EscPosImage escposImage = new DitherableEscPosImage(new CoffeeImageImpl(chunk), null); // TODO: der algorithm sollte vielleicht aus dem EscPoImage raus. Oder wir machen ein eigenes.
+        EscPosImage escposImage = new DitherableEscPosImage(new CoffeeImageImpl(chunk));
         escpos.write(new DitheredEpsonGrayscaleImageWrapper(), escposImage);
     }
 

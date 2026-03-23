@@ -1,6 +1,5 @@
 package de.flubba;
 
-import com.github.anastaciocintra.escpos.image.Bitonal;
 import com.github.anastaciocintra.escpos.image.CoffeeImage;
 import com.github.anastaciocintra.escpos.image.EscPosImage;
 
@@ -10,12 +9,11 @@ public class DitherableEscPosImage extends EscPosImage {
     /**
      * creates an EscPosImage
      *
-     * @param image            normal RGB image
-     * @param bitonalAlgorithm Algorithm that transform RGB to bitonal
+     * @param image normal RGB image
      * @see #getBitonalVal(int, int)
      */
-    public DitherableEscPosImage(CoffeeImage image, Bitonal bitonalAlgorithm) {
-        super(image, bitonalAlgorithm);
+    public DitherableEscPosImage(CoffeeImage image) {
+        super(image, null);
     }
 
     public ByteArrayOutputStream getRasterBytesByColorIndex(int colorIndex) {

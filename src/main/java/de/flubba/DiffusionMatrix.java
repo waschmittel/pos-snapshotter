@@ -32,8 +32,8 @@ public enum DiffusionMatrix {
         }
     }
 
-    private static float calculateDivisor(double[][] matrix) {
-        float sum = 0;
+    private static double calculateDivisor(double[][] matrix) {
+        double sum = 0;
         for (double[] row : matrix) {
             for (double value : row) {
                 sum += value;
