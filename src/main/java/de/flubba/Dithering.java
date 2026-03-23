@@ -14,7 +14,7 @@ import java.util.stream.Stream;
 
 @Slf4j
 public class Dithering {
-    private static final boolean WRITE_DEBUG_IMAGES = true; // TODO: make this configurable
+    private static final boolean WRITE_DEBUG_IMAGES = false; // TODO: make this configurable
     private static final AtomicInteger DEBUG_IMAGE_NO = new AtomicInteger(0);
 
     // JARVIS_JUDICE_NINKE has a sharpening effect
@@ -39,7 +39,7 @@ public class Dithering {
     // number of vertical tiles, more tiles = more local adaptation
     public static final int CLAHE_TILES_Y = 4;
     // contrast clip limit (1.0 = no clipping, higher = more contrast)
-    public static final double CLAHE_CLIP_LIMIT = 2.5;
+    public static final double CLAHE_CLIP_LIMIT = 1.5;
     // number of histogram bins, histogram resolution (256 matches 8-bit depth
     public static final int CLAHE_NUM_BINS = 256;
 
@@ -51,6 +51,15 @@ public class Dithering {
         applyGammaCorrection(pixels, DITHERING_GAMMA); //TODO: the DitherableEscPosImage should know about the gamma values
 
         return chunkAndConvertToBufferedImages(pixels);
+    }
+
+    public static BufferedImage toDitheredImage(BufferedImage image) {
+        var pixels = convertToGrayscale(image);
+        applyCLAHE(pixels);
+        applyGammaCorrection(pixels, PRE_DITHERING_GAMMA);
+        applyErrorDiffusionDithering(pixels);
+        applyGammaCorrection(pixels, DITHERING_GAMMA);
+        return toImage(pixels);
     }
 
     private static ArrayList<BufferedImage> chunkAndConvertToBufferedImages(double[][] pixels) {

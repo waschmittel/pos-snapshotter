@@ -17,6 +17,7 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridLayout;
 import java.awt.RenderingHints;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Slf4j
 public class SnapshotterFrame extends JFrame {
     private final CameraPanel cameraPanel;
+    private final ImagePanel previewPanel;
     private final JButton captureButton;
     private final FrameGrabber grabber;
     private final Java2DFrameConverter converter = new Java2DFrameConverter();
@@ -55,6 +57,9 @@ public class SnapshotterFrame extends JFrame {
         cameraPanel = new CameraPanel();
         cameraPanel.setPreferredSize(new Dimension(grabber.getImageWidth(), grabber.getImageHeight()));
 
+        previewPanel = new ImagePanel("Dithering preview...");
+        previewPanel.setPreferredSize(new Dimension(grabber.getImageWidth(), grabber.getImageHeight()));
+
         captureButton = new JButton("Take Photo");
         captureButton.setFont(new Font("SansSerif", Font.BOLD, 32));
         captureButton.setPreferredSize(new Dimension(0, 80));
@@ -63,13 +68,18 @@ public class SnapshotterFrame extends JFrame {
         captureButton.setFocusPainted(false);
         captureButton.addActionListener(_ -> startCountdown());
 
+        JPanel panels = new JPanel(new GridLayout(1, 2));
+        panels.add(cameraPanel);
+        panels.add(previewPanel);
+
         setLayout(new BorderLayout());
-        add(cameraPanel, BorderLayout.CENTER);
+        add(panels, BorderLayout.CENTER);
         add(captureButton, BorderLayout.SOUTH);
         pack();
         setLocationRelativeTo(null);
 
         startCameraLoop();
+        startDitheringLoop();
     }
 
     private void startCameraLoop() {
@@ -87,12 +97,34 @@ public class SnapshotterFrame extends JFrame {
                             cameraPanel.updateImage(copy);
                         }
                     }
-                    Thread.sleep(33); // ~30 fps
+                    // TODO: irgendwas macht mords CPU-Load ... unde es scheint weder der dithering-loop zu sein noch dieser.
+                    Thread.sleep(2000); // ~5 fps
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
                 } catch (Exception e) {
                     log.error("Error grabbing frame", e);
+                }
+            }
+        });
+    }
+
+    private void startDitheringLoop() {
+        Thread.ofVirtual().name("dithering-loop").start(() -> {
+            while (running.get()) {
+                try {
+                    BufferedImage image = cameraPanel.getCurrentImage();
+                    if (image != null) {
+                        BufferedImage dithered = Dithering.toDitheredImage(image);
+                        previewPanel.updateImage(dithered);
+                    } else {
+                        Thread.sleep(2000);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    log.error("Error dithering frame", e);
                 }
             }
         });
@@ -150,11 +182,15 @@ public class SnapshotterFrame extends JFrame {
     }
 
     /**
-     * Panel that displays the live camera feed and countdown overlay.
+     * Panel that displays an image scaled to fit, with a placeholder message when no image is available.
      */
-    private class CameraPanel extends JPanel {
+    private static class ImagePanel extends JPanel {
         private volatile BufferedImage currentImage;
-        private volatile boolean flashing;
+        private final String placeholderMessage;
+
+        ImagePanel(String placeholderMessage) {
+            this.placeholderMessage = placeholderMessage;
+        }
 
         void updateImage(BufferedImage image) {
             this.currentImage = image;
@@ -163,6 +199,43 @@ public class SnapshotterFrame extends JFrame {
 
         BufferedImage getCurrentImage() {
             return currentImage;
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            Graphics2D g2 = (Graphics2D) g;
+
+            if (currentImage != null) {
+                double scale = Math.min(
+                        (double) getWidth() / currentImage.getWidth(),
+                        (double) getHeight() / currentImage.getHeight());
+                int w = (int) (currentImage.getWidth() * scale);
+                int h = (int) (currentImage.getHeight() * scale);
+                int x = (getWidth() - w) / 2;
+                int y = (getHeight() - h) / 2;
+
+                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g2.drawImage(currentImage, x, y, w, h, null);
+            } else {
+                g2.setColor(Color.DARK_GRAY);
+                g2.fillRect(0, 0, getWidth(), getHeight());
+                g2.setColor(Color.WHITE);
+                g2.setFont(new Font("SansSerif", Font.PLAIN, 24));
+                FontMetrics fm = g2.getFontMetrics();
+                g2.drawString(placeholderMessage, (getWidth() - fm.stringWidth(placeholderMessage)) / 2, getHeight() / 2);
+            }
+        }
+    }
+
+    /**
+     * Panel that displays the live camera feed with countdown and flash overlays.
+     */
+    private class CameraPanel extends ImagePanel {
+        private volatile boolean flashing;
+
+        CameraPanel() {
+            super("Starting camera...");
         }
 
         void flash() {
@@ -180,28 +253,6 @@ public class SnapshotterFrame extends JFrame {
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
             Graphics2D g2 = (Graphics2D) g;
-
-            if (currentImage != null) {
-                // scale to fill panel while maintaining aspect ratio
-                double scale = Math.min(
-                        (double) getWidth() / currentImage.getWidth(),
-                        (double) getHeight() / currentImage.getHeight());
-                int w = (int) (currentImage.getWidth() * scale);
-                int h = (int) (currentImage.getHeight() * scale);
-                int x = (getWidth() - w) / 2;
-                int y = (getHeight() - h) / 2;
-
-                g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                g2.drawImage(currentImage, x, y, w, h, null);
-            } else {
-                g2.setColor(Color.DARK_GRAY);
-                g2.fillRect(0, 0, getWidth(), getHeight());
-                g2.setColor(Color.WHITE);
-                g2.setFont(new Font("SansSerif", Font.PLAIN, 24));
-                String msg = "Starting camera...";
-                FontMetrics fm = g2.getFontMetrics();
-                g2.drawString(msg, (getWidth() - fm.stringWidth(msg)) / 2, getHeight() / 2);
-            }
 
             // flash overlay
             if (flashing) {
