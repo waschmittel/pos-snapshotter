@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ExternalStorageConfigurationManager" enabled="true" />
+  <component name="MavenProjectsManager">
+    <option name="originalFiles">
+      <list>
+        <option value="$PROJECT_DIR$/pom.xml" />
+      </list>
+    </option>
+  </component>
+  <component name="ProjectRootManager" version="2" languageLevel="JDK_25" default="true" project-jdk-name="temurin-25" project-jdk-type="JavaSDK">
+    <output url="file://$PROJECT_DIR$/out" />
+  </component>
+  <component name="SaveActionSettings">
+    <option name="actions">
+      <set>
+        <option value="activate" />
+        <option value="noActionIfCompileErrors" />
+        <option value="organizeImports" />
+        <option value="reformat" />
+        <option value="missingOverrideAnnotation" />
+        <option value="useBlocks" />
+        <option value="unnecessaryThis" />
+        <option value="finalPrivateMethod" />
+        <option value="explicitTypeCanBeDiamond" />
+        <option value="unnecessarySemicolon" />
+      </set>
+    </option>
+    <option name="configurationPath" value="" />
+  </component>
+</project>
