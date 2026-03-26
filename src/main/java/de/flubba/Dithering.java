@@ -17,48 +17,47 @@ public class Dithering {
     private static final boolean WRITE_DEBUG_IMAGES = false; // TODO: make this configurable
     private static final AtomicInteger DEBUG_IMAGE_NO = new AtomicInteger(0);
 
-    // JARVIS_JUDICE_NINKE has a sharpening effect
-    // SIERRA_LITE is the smoothest combined with the printer's own fine dithering for grayscale
-    private static final DiffusionMatrix DIFFUSION_MATRIX = DiffusionMatrix.SIERRA_LITE;
-
-    // gamma for the actual image, not for dithering
-    public static final double PRE_DITHERING_GAMMA = 1.2;
-
-    // very dependent on printer - higher value use less grayscale values -- 3 is basically black + white
-    private static final double DITHERING_GAMMA = 3;
-
     // more steps means finer grays, but also dependent on printer
-    private static final int GRAY_LEVELS = 4;
-    private static final double[] GRAYSCALE_LEVELS = Stream.iterate(0, i -> ++i)
-            .limit(GRAY_LEVELS + 1)
-            .mapToDouble(i -> Math.pow(Math.pow(1d / GRAY_LEVELS * i, DITHERING_GAMMA), DITHERING_GAMMA))
-            .toArray();
+    private static final int GRAY_LEVELS = 16;
 
-    // number of horizontal tiles, more tiles = more local adaptation
-    public static final int CLAHE_TILES_X = 8; // TODO: only define the x pixels and derive the y pixels from aspect ratio
-    // number of vertical tiles, more tiles = more local adaptation
-    public static final int CLAHE_TILES_Y = 4;
-    // contrast clip limit (1.0 = no clipping, higher = more contrast)
-    public static final double CLAHE_CLIP_LIMIT = 1.5;
-    // number of histogram bins, histogram resolution (256 matches 8-bit depth
+    // number of histogram bins, histogram resolution (256 matches 8-bit depth)
     public static final int CLAHE_NUM_BINS = 256;
 
-    public static List<BufferedImage> toDitheredChunks(BufferedImage image) throws IOException {
+    public static List<BufferedImage> toDitheredChunks(BufferedImage image, DitherParams params) throws IOException {
         var pixels = convertToGrayscale(image);
-        applyCLAHE(pixels);
-        applyGammaCorrection(pixels, PRE_DITHERING_GAMMA);
-        applyErrorDiffusionDithering(pixels);
-        applyGammaCorrection(pixels, DITHERING_GAMMA); //TODO: the DitherableEscPosImage should know about the gamma values
-
-        return chunkAndConvertToBufferedImages(pixels);
+        writeDebugImage(pixels, "converted_to_grayscale");
+        applyCLAHE(pixels, params);
+        writeDebugImage(pixels, "clahe_applied");
+        applyGammaCorrection(pixels, params.preDitheringGamma());
+        writeDebugImage(pixels, "pre_dithering_gamma_corrected");
+        applyErrorDiffusionDithering(pixels, params);
+        applyGammaCorrection(pixels, 1 / params.preDitheringGamma());
+        writeDebugImage(pixels, "dithered");
+        //applyGammaCorrection(pixels, params.ditheringGamma()); //TODO: the DitherableEscPosImage should know about the gamma values
+        writeDebugImage(pixels, "gamma_corrected");
+        return chunkAndConvertToBufferedImages(transpose(pixels));
     }
 
-    public static BufferedImage toDitheredImage(BufferedImage image) {
+    public static double[][] transpose(double[][] matrix) {
+        int rows = matrix.length;
+        int cols = matrix[0].length;
+
+        double[][] transposed = new double[cols][rows];
+
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                transposed[j][i] = matrix[i][j];
+            }
+        }
+        return transposed;
+    }
+
+    public static BufferedImage toDitheredImage(BufferedImage image, DitherParams params) {
         var pixels = convertToGrayscale(image);
-        applyCLAHE(pixels);
-        applyGammaCorrection(pixels, PRE_DITHERING_GAMMA);
-        applyErrorDiffusionDithering(pixels);
-        applyGammaCorrection(pixels, DITHERING_GAMMA);
+        applyCLAHE(pixels, params);
+        applyGammaCorrection(pixels, params.preDitheringGamma());
+        applyErrorDiffusionDithering(pixels, params);
+        applyGammaCorrection(pixels, params.ditheringGamma());
         return toImage(pixels);
     }
 
@@ -125,7 +124,6 @@ public class Dithering {
                 pixels[y][x] = (0.6 * r + 0.2 * g + 0.2 * b) / 255.0; // TODO: maybe make the grayscale weights adjustable
             }
         }
-        writeDebugImage(pixels, "converted_to_grayscale");
         return pixels;
     }
 
@@ -136,11 +134,11 @@ public class Dithering {
                 pixels[y][x] = linear;
             }
         }
-        writeDebugImage(pixels, "gamma_corrected");
     }
 
-    private static void applyErrorDiffusionDithering(double[][] pixels) {
-        var matrix = DIFFUSION_MATRIX.matrix;
+    private static void applyErrorDiffusionDithering(double[][] pixels, DitherParams params) {
+        var matrix = params.diffusionMatrix().matrix;
+        double[] grayscaleLevels = computeGrayscaleLevels();
 
         int width = pixels[0].length;
         int height = pixels.length;
@@ -186,22 +184,26 @@ public class Dithering {
     /**
      * Contrast Limited Adaptive Histogram Equalization (CLAHE).
      * Operates on the double[][] pixels array (values 0.0–1.0).
+     * CLAHE_TILES_Y is derived from CLAHE_TILES_X to match the image aspect ratio.
      *
      * @param pixels grayscale image, values in [0,1]
      */
-    private static void applyCLAHE(double[][] pixels) {
+    private static void applyCLAHE(double[][] pixels, DitherParams params) {
         int height = pixels.length;
         int width = pixels[0].length;
 
-        // Build a CDF lookup for each tile
-        double[][][] cdfs = new double[CLAHE_TILES_Y][CLAHE_TILES_X][CLAHE_NUM_BINS];
+        int tilesX = params.claheTilesX();
+        int tilesY = Math.max(1, (int) Math.round(tilesX * (double) height / width));
 
-        for (int ty = 0; ty < CLAHE_TILES_Y; ty++) {
-            for (int tx = 0; tx < CLAHE_TILES_X; tx++) {
-                int y0 = ty * height / CLAHE_TILES_Y;
-                int y1 = (ty + 1) * height / CLAHE_TILES_Y;
-                int x0 = tx * width / CLAHE_TILES_X;
-                int x1 = (tx + 1) * width / CLAHE_TILES_X;
+        // Build a CDF lookup for each tile
+        double[][][] cdfs = new double[tilesY][tilesX][CLAHE_NUM_BINS];
+
+        for (int ty = 0; ty < tilesY; ty++) {
+            for (int tx = 0; tx < tilesX; tx++) {
+                int y0 = ty * height / tilesY;
+                int y1 = (ty + 1) * height / tilesY;
+                int x0 = tx * width / tilesX;
+                int x1 = (tx + 1) * width / tilesX;
                 int tilePixels = (y1 - y0) * (x1 - x0);
 
                 // Build histogram
@@ -214,7 +216,7 @@ public class Dithering {
                 }
 
                 // Clip histogram and redistribute
-                double limit = CLAHE_CLIP_LIMIT * tilePixels / CLAHE_NUM_BINS;
+                double limit = params.claheClipLimit() * tilePixels / CLAHE_NUM_BINS;
                 double excess = 0;
                 for (int i = 0; i < CLAHE_NUM_BINS; i++) {
                     if (hist[i] > limit) {
@@ -245,8 +247,8 @@ public class Dithering {
                 int bin = Math.min((int) (pixels[y][x] * CLAHE_NUM_BINS), CLAHE_NUM_BINS - 1);
 
                 // Find the tile-centre coordinates this pixel falls between
-                double tyCentre = ((double) y / height) * CLAHE_TILES_Y - 0.5;
-                double txCentre = ((double) x / width) * CLAHE_TILES_X - 0.5;
+                double tyCentre = ((double) y / height) * tilesY - 0.5;
+                double txCentre = ((double) x / width) * tilesX - 0.5;
 
                 int ty1 = (int) Math.floor(tyCentre);
                 int ty2 = ty1 + 1;
@@ -257,10 +259,10 @@ public class Dithering {
                 double fx = txCentre - tx1;
 
                 // Clamp tile indices
-                ty1 = Math.max(0, Math.min(ty1, CLAHE_TILES_Y - 1));
-                ty2 = Math.max(0, Math.min(ty2, CLAHE_TILES_Y - 1));
-                tx1 = Math.max(0, Math.min(tx1, CLAHE_TILES_X - 1));
-                tx2 = Math.max(0, Math.min(tx2, CLAHE_TILES_X - 1));
+                ty1 = Math.max(0, Math.min(ty1, tilesY - 1));
+                ty2 = Math.max(0, Math.min(ty2, tilesY - 1));
+                tx1 = Math.max(0, Math.min(tx1, tilesX - 1));
+                tx2 = Math.max(0, Math.min(tx2, tilesX - 1));
 
                 // Bilinear interpolation
                 double val = (1 - fy) * ((1 - fx) * cdfs[ty1][tx1][bin] + fx * cdfs[ty1][tx2][bin])
@@ -269,8 +271,6 @@ public class Dithering {
                 pixels[y][x] = Math.max(0.0, Math.min(1.0, val));
             }
         }
-
-        writeDebugImage(pixels, "clahe_applied");
     }
 
 }

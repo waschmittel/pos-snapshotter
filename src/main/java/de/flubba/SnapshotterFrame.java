@@ -6,13 +6,19 @@ import org.bytedeco.javacv.FrameGrabber;
 import org.bytedeco.javacv.Java2DFrameConverter;
 import org.bytedeco.javacv.OpenCVFrameGrabber;
 
+import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JFrame;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JSpinner;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
@@ -37,6 +43,14 @@ public class SnapshotterFrame extends JFrame {
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicInteger countdown = new AtomicInteger(-1);
     private final AtomicReference<BufferedImage> lastSnapshot = new AtomicReference<>();
+    public static final AtomicReference<DitherParams> CURRENT_PARAMS = new AtomicReference<>(DitherParams.defaults());
+
+    // parameter controls
+    private JComboBox<DiffusionMatrix> matrixCombo;
+    private JSpinner ditheringGammaSpinner;
+    private JSpinner preDitheringGammaSpinner;
+    private JSpinner claheTilesXSpinner;
+    private JSpinner claheClipLimitSpinner;
 
     public SnapshotterFrame() throws FrameGrabber.Exception {
         super("POS Snapshotter");
@@ -73,6 +87,7 @@ public class SnapshotterFrame extends JFrame {
         panels.add(previewPanel);
 
         setLayout(new BorderLayout());
+        add(buildParamsPanel(), BorderLayout.NORTH);
         add(panels, BorderLayout.CENTER);
         add(captureButton, BorderLayout.SOUTH);
         pack();
@@ -80,6 +95,53 @@ public class SnapshotterFrame extends JFrame {
 
         startCameraLoop();
         startDitheringLoop();
+    }
+
+    private JPanel buildParamsPanel() {
+        DitherParams defaults = DitherParams.defaults();
+
+        matrixCombo = new JComboBox<>(DiffusionMatrix.values());
+        matrixCombo.setSelectedItem(defaults.diffusionMatrix());
+        matrixCombo.addActionListener(_ -> syncParams());
+
+        ditheringGammaSpinner = new JSpinner(new SpinnerNumberModel(defaults.ditheringGamma(), 0.1, 6.0, 0.1));
+        ((JSpinner.NumberEditor) ditheringGammaSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
+        ditheringGammaSpinner.addChangeListener(_ -> syncParams());
+
+        preDitheringGammaSpinner = new JSpinner(new SpinnerNumberModel(defaults.preDitheringGamma(), 0.1, 3.0, 0.1));
+        ((JSpinner.NumberEditor) preDitheringGammaSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
+        preDitheringGammaSpinner.addChangeListener(_ -> syncParams());
+
+        claheTilesXSpinner = new JSpinner(new SpinnerNumberModel(defaults.claheTilesX(), 1, 32, 1));
+        claheTilesXSpinner.addChangeListener(_ -> syncParams());
+
+        claheClipLimitSpinner = new JSpinner(new SpinnerNumberModel(defaults.claheClipLimit(), 1.0, 8.0, 0.1));
+        ((JSpinner.NumberEditor) claheClipLimitSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
+        claheClipLimitSpinner.addChangeListener(_ -> syncParams());
+
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 6));
+        panel.setBorder(BorderFactory.createTitledBorder("Dithering Parameters"));
+        panel.add(new JLabel("Diffusion:"));
+        panel.add(matrixCombo);
+        panel.add(new JLabel("Dithering γ:"));
+        panel.add(ditheringGammaSpinner);
+        panel.add(new JLabel("Pre-dither γ:"));
+        panel.add(preDitheringGammaSpinner);
+        panel.add(new JLabel("CLAHE tiles X:"));
+        panel.add(claheTilesXSpinner);
+        panel.add(new JLabel("CLAHE clip:"));
+        panel.add(claheClipLimitSpinner);
+        return panel;
+    }
+
+    private void syncParams() {
+        CURRENT_PARAMS.set(new DitherParams(
+                (DiffusionMatrix) matrixCombo.getSelectedItem(),
+                (double) ditheringGammaSpinner.getValue(),
+                (double) preDitheringGammaSpinner.getValue(),
+                (int) claheTilesXSpinner.getValue(),
+                (double) claheClipLimitSpinner.getValue()
+        ));
     }
 
     private void startCameraLoop() {
@@ -90,14 +152,17 @@ public class SnapshotterFrame extends JFrame {
                     if (frame != null) {
                         BufferedImage image = converter.convert(frame);
                         if (image != null) {
-                            // make a copy since the converter reuses the buffer
-                            BufferedImage copy = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_3BYTE_BGR);
-                            copy.getGraphics().drawImage(image, 0, 0, null);
+                            // scale to target resolution (camera may deliver a different size than requested)
+                            BufferedImage copy = new BufferedImage(910, 512, BufferedImage.TYPE_3BYTE_BGR);
+                            Graphics2D g2 = copy.createGraphics();
+                            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                            g2.drawImage(image, 0, 0, 910, 512, null);
+                            g2.dispose();
                             cameraPanel.updateImage(copy); // TODO: update async
                         }
                     }
                     // TODO: irgendwas macht mords CPU-Load ... unde es scheint weder der dithering-loop zu sein noch dieser.
-                    Thread.sleep(2000); // ~5 fps
+                    Thread.sleep(200); // ~5 fps
                 } catch (InterruptedException e) {
                     log.warn("Camera loop interrupted");
                     Thread.currentThread().interrupt();
@@ -115,10 +180,10 @@ public class SnapshotterFrame extends JFrame {
                 try {
                     BufferedImage image = cameraPanel.getCurrentImage();
                     if (image != null) {
-                        BufferedImage dithered = Dithering.toDitheredImage(image);
+                        BufferedImage dithered = Dithering.toDitheredImage(image, CURRENT_PARAMS.get());
                         previewPanel.updateImage(dithered);
                     }
-                    Thread.sleep(500);
+                    Thread.sleep(200);
                 } catch (InterruptedException e) {
                     log.warn("Dithering loop interrupted");
                     Thread.currentThread().interrupt();
@@ -155,8 +220,8 @@ public class SnapshotterFrame extends JFrame {
             lastSnapshot.set(snapshot);
             log.info("Photo captured ({}x{})", snapshot.getWidth(), snapshot.getHeight());
             try {
-                var chunks = Dithering.toDitheredChunks(snapshot);
-                //Main.printIt(chunks);
+                var chunks = Dithering.toDitheredChunks(snapshot, CURRENT_PARAMS.get());
+                Main.printIt(chunks);
             } catch (IOException e) {
                 throw new RuntimeException(e); // TODO ...
             }
