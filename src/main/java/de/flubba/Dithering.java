@@ -2,23 +2,38 @@ package de.flubba;
 
 import lombok.extern.slf4j.Slf4j;
 
-import javax.imageio.ImageIO;
 import java.awt.Color;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
 
 @Slf4j
 public class Dithering {
     private static final boolean WRITE_DEBUG_IMAGES = false; // TODO: make this configurable
     private static final AtomicInteger DEBUG_IMAGE_NO = new AtomicInteger(0);
 
-    // more steps means finer grays, but also dependent on printer
-    private static final int GRAY_LEVELS = 16;
+    // Empirical grayscale levels from printer calibration (epson-multi-tone LUT).
+    // Each entry = perceived brightness [0=black, 1=white] that the corresponding printer level produces.
+    // Index 0 = darkest (byte 0, printer level 15), index 11 = lightest (byte 176, printer level 4).
+    private static final double[] EMPIRICAL_LEVELS = {
+            0.000,  // printer level 15 (black)
+            0.018,  // printer level 14 (interpolated)
+            0.035,  // printer level 13
+            0.176,  // printer level 12
+            0.212,  // printer level 11
+            0.384,  // printer level 10
+            0.420,  // printer level 9
+            0.616,  // printer level 8
+            0.824,  // printer level 7
+            0.949,  // printer level 6
+            0.984,  // printer level 5
+            1.000,  // printer level 4 (white)
+    };
+
+    // Byte values sent to printer for each level index (maps to 4-bit thermal head control)
+    private static final int[] LEVEL_TO_BYTE = {0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176};
 
     // number of histogram bins, histogram resolution (256 matches 8-bit depth)
     public static final int CLAHE_NUM_BINS = 256;
@@ -28,21 +43,18 @@ public class Dithering {
         writeDebugImage(pixels, "converted_to_grayscale");
         applyCLAHE(pixels, params);
         writeDebugImage(pixels, "clahe_applied");
+        applySharpen(pixels, params.sharpness());
         applyGammaCorrection(pixels, params.preDitheringGamma());
         writeDebugImage(pixels, "pre_dithering_gamma_corrected");
-        applyErrorDiffusionDithering(pixels, params);
-        applyGammaCorrection(pixels, 1 / params.preDitheringGamma());
-        writeDebugImage(pixels, "dithered");
-        //applyGammaCorrection(pixels, params.ditheringGamma()); //TODO: the DitherableEscPosImage should know about the gamma values
-        writeDebugImage(pixels, "gamma_corrected");
-        return chunkAndConvertToBufferedImages(transpose(pixels));
+        var pixels255 = applyErrorDiffusionDitheringAndMapToBytes(pixels, params);
+        return chunkAndConvertToBufferedImages(transpose(pixels255));
     }
 
-    public static double[][] transpose(double[][] matrix) {
+    public static int[][] transpose(int[][] matrix) {
         int rows = matrix.length;
         int cols = matrix[0].length;
 
-        double[][] transposed = new double[cols][rows];
+        int[][] transposed = new int[cols][rows];
 
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
@@ -55,13 +67,14 @@ public class Dithering {
     public static BufferedImage toDitheredImage(BufferedImage image, DitherParams params) {
         var pixels = convertToGrayscale(image);
         applyCLAHE(pixels, params);
+        applySharpen(pixels, params.sharpness());
         applyGammaCorrection(pixels, params.preDitheringGamma());
         applyErrorDiffusionDithering(pixels, params);
-        applyGammaCorrection(pixels, params.ditheringGamma());
+        // pixels now contain perceptual brightness values from EMPIRICAL_LEVELS
         return toImage(pixels);
     }
 
-    private static ArrayList<BufferedImage> chunkAndConvertToBufferedImages(double[][] pixels) {
+    private static ArrayList<BufferedImage> chunkAndConvertToBufferedImages(int[][] pixels) {
         var chunks = new ArrayList<BufferedImage>();
         int maxHeight = 200;
 
@@ -72,7 +85,7 @@ public class Dithering {
             int endY = Math.min((chunk + 1) * maxHeight, pixels.length);
             int chunkHeight = endY - startY;
 
-            double[][] chunkPixels = new double[chunkHeight][pixels[0].length];
+            int[][] chunkPixels = new int[chunkHeight][pixels[0].length];
             for (int y = 0; y < chunkHeight; y++) {
                 System.arraycopy(pixels[startY + y], 0, chunkPixels[y], 0, pixels[0].length);
             }
@@ -83,13 +96,6 @@ public class Dithering {
     }
 
     private static void writeDebugImage(double[][] pixels, String name) {
-        if (WRITE_DEBUG_IMAGES) {
-            try {
-                ImageIO.write(toImage(pixels), "png", new File("%s_%s.png".formatted(DEBUG_IMAGE_NO.getAndIncrement(), name)));
-            } catch (IOException e) {
-                log.error("Failed to write debug image: " + e.getMessage());
-            }
-        }
     }
 
     private static BufferedImage toImage(double[][] pixels) {
@@ -99,7 +105,21 @@ public class Dithering {
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                var grayscaleVal = clamp((int) (pixels[y][x] * 255));
+                int grayscaleVal = clamp((int) (pixels[y][x] * 255));
+                result.setRGB(x, y, new Color(grayscaleVal, grayscaleVal, grayscaleVal).getRGB());
+            }
+        }
+        return result;
+    }
+
+    private static BufferedImage toImage(int[][] pixels) {
+        int width = pixels[0].length;
+        int height = pixels.length;
+        BufferedImage result = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int grayscaleVal = clamp(pixels[y][x]);
                 result.setRGB(x, y, new Color(grayscaleVal, grayscaleVal, grayscaleVal).getRGB());
             }
         }
@@ -119,26 +139,49 @@ public class Dithering {
             for (int x = 0; x < width; x++) {
                 int rgb = image.getRGB(x, y);
                 int r = (rgb >> 16) & 0xFF;
-                int g = (rgb >>  8) & 0xFF;
-                int b =  rgb        & 0xFF;
+                int g = (rgb >> 8) & 0xFF;
+                int b = rgb & 0xFF;
                 pixels[y][x] = (0.6 * r + 0.2 * g + 0.2 * b) / 255.0; // TODO: maybe make the grayscale weights adjustable
             }
         }
         return pixels;
     }
 
+    private static void applySharpen(double[][] pixels, double strength) {
+        if (strength == 0.0) return;
+        int height = pixels.length;
+        int width = pixels[0].length;
+
+        // Copy original for reading while writing sharpened values
+        double[][] original = new double[height][width];
+        for (int y = 0; y < height; y++) {
+            System.arraycopy(pixels[y], 0, original[y], 0, width);
+        }
+
+        // Unsharp mask: sharpened = original + strength * (original - blurred)
+        // Using 3x3 box blur as the blur kernel
+        for (int y = 1; y < height - 1; y++) {
+            for (int x = 1; x < width - 1; x++) {
+                double center = original[y][x];
+                double neighbors = original[y - 1][x] + original[y + 1][x]
+                        + original[y][x - 1] + original[y][x + 1];
+                double detail = center - neighbors / 4.0;
+                pixels[y][x] = Math.max(0.0, Math.min(1.0, center + strength * detail));
+            }
+        }
+    }
+
     private static void applyGammaCorrection(double[][] pixels, double gamma) {
+        if (gamma == 1.0) return;
         for (int y = 0; y < pixels.length; y++) {
             for (int x = 0; x < pixels[y].length; x++) {
-                double linear = Math.pow(Math.pow(pixels[y][x], gamma), gamma);
-                pixels[y][x] = linear;
+                pixels[y][x] = Math.pow(pixels[y][x], gamma);
             }
         }
     }
 
     private static void applyErrorDiffusionDithering(double[][] pixels, DitherParams params) {
         var matrix = params.diffusionMatrix().matrix;
-        double[] grayscaleLevels = computeGrayscaleLevels();
 
         int width = pixels[0].length;
         int height = pixels.length;
@@ -150,14 +193,16 @@ public class Dithering {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 double oldValue = pixels[y][x];
-                double newValue = findNearestLevel(oldValue);
-                double error = oldValue - newValue;
-                pixels[y][x] = newValue;
+                int nearestIndex = findNearestLevelIndex(oldValue);
+                double nearestValue = EMPIRICAL_LEVELS[nearestIndex];
+                double error = oldValue - nearestValue;
+                // Store perceptual brightness for preview display
+                pixels[y][x] = nearestValue;
 
                 for (int matrixY = 0; matrixY < matrixHeight; matrixY++) {
                     for (int matrixX = 0; matrixX < matrixWidth; matrixX++) {
                         int diffusionY = y + matrixY;
-                        int diffusionX = x + matrixX - offsetX; // TODO: why this offset?
+                        int diffusionX = x + matrixX - offsetX;
                         if (diffusionY >= 0 && diffusionY < height && diffusionX >= 0 && diffusionX < width) {
                             pixels[diffusionY][diffusionX] += error * matrix[matrixY][matrixX];
                         }
@@ -165,20 +210,52 @@ public class Dithering {
                 }
             }
         }
-        writeDebugImage(pixels, "dithered");
     }
 
-    private static double findNearestLevel(double value) {
-        double nearest = GRAYSCALE_LEVELS[0];
-        double minDiff = value <= nearest ? nearest - value : value - nearest;
-        for (int i = 1; i < GRAYSCALE_LEVELS.length; i++) {
-            double diff = value <= GRAYSCALE_LEVELS[i] ? GRAYSCALE_LEVELS[i] - value : value - GRAYSCALE_LEVELS[i];
-            if (diff < minDiff) {
-                minDiff = diff;
-                nearest = GRAYSCALE_LEVELS[i];
+    private static int[][] applyErrorDiffusionDitheringAndMapToBytes(double[][] pixels, DitherParams params) {
+        var result = new int[pixels.length][pixels[0].length];
+        var matrix = params.diffusionMatrix().matrix;
+
+        int width = pixels[0].length;
+        int height = pixels.length;
+
+        int matrixHeight = matrix.length;
+        int matrixWidth = matrix[0].length;
+        int offsetX = matrixWidth / 2;
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                double oldValue = pixels[y][x];
+                int nearestIndex = findNearestLevelIndex(oldValue);
+                double nearestValue = EMPIRICAL_LEVELS[nearestIndex];
+                double error = oldValue - nearestValue;
+                result[y][x] = LEVEL_TO_BYTE[nearestIndex];
+
+                for (int matrixY = 0; matrixY < matrixHeight; matrixY++) {
+                    for (int matrixX = 0; matrixX < matrixWidth; matrixX++) {
+                        int diffusionY = y + matrixY;
+                        int diffusionX = x + matrixX - offsetX;
+                        if (diffusionY >= 0 && diffusionY < height && diffusionX >= 0 && diffusionX < width) {
+                            pixels[diffusionY][diffusionX] += error * matrix[matrixY][matrixX];
+                        }
+                    }
+                }
             }
         }
-        return nearest;
+        return result;
+    }
+
+    private static int findNearestLevelIndex(double value) {
+        int nearestIndex = 0;
+        double minDiff = Math.abs(value - EMPIRICAL_LEVELS[0]);
+        for (int i = 1; i < EMPIRICAL_LEVELS.length; i++) {
+            double diff = Math.abs(value - EMPIRICAL_LEVELS[i]);
+            if (diff < minDiff) {
+                minDiff = diff;
+                nearestIndex = i;
+            }
+        }
+        return nearestIndex;
     }
 
     /**

@@ -47,8 +47,8 @@ public class SnapshotterFrame extends JFrame {
 
     // parameter controls
     private JComboBox<DiffusionMatrix> matrixCombo;
-    private JSpinner ditheringGammaSpinner;
     private JSpinner preDitheringGammaSpinner;
+    private JSpinner sharpnessSpinner;
     private JSpinner claheTilesXSpinner;
     private JSpinner claheClipLimitSpinner;
 
@@ -104,13 +104,13 @@ public class SnapshotterFrame extends JFrame {
         matrixCombo.setSelectedItem(defaults.diffusionMatrix());
         matrixCombo.addActionListener(_ -> syncParams());
 
-        ditheringGammaSpinner = new JSpinner(new SpinnerNumberModel(defaults.ditheringGamma(), 0.1, 6.0, 0.1));
-        ((JSpinner.NumberEditor) ditheringGammaSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
-        ditheringGammaSpinner.addChangeListener(_ -> syncParams());
-
         preDitheringGammaSpinner = new JSpinner(new SpinnerNumberModel(defaults.preDitheringGamma(), 0.1, 3.0, 0.1));
         ((JSpinner.NumberEditor) preDitheringGammaSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
         preDitheringGammaSpinner.addChangeListener(_ -> syncParams());
+
+        sharpnessSpinner = new JSpinner(new SpinnerNumberModel(defaults.sharpness(), 0.0, 5.0, 0.1));
+        ((JSpinner.NumberEditor) sharpnessSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
+        sharpnessSpinner.addChangeListener(_ -> syncParams());
 
         claheTilesXSpinner = new JSpinner(new SpinnerNumberModel(defaults.claheTilesX(), 1, 32, 1));
         claheTilesXSpinner.addChangeListener(_ -> syncParams());
@@ -123,10 +123,10 @@ public class SnapshotterFrame extends JFrame {
         panel.setBorder(BorderFactory.createTitledBorder("Dithering Parameters"));
         panel.add(new JLabel("Diffusion:"));
         panel.add(matrixCombo);
-        panel.add(new JLabel("Dithering γ:"));
-        panel.add(ditheringGammaSpinner);
-        panel.add(new JLabel("Pre-dither γ:"));
+        panel.add(new JLabel("Brightness γ:"));
         panel.add(preDitheringGammaSpinner);
+        panel.add(new JLabel("Sharpness:"));
+        panel.add(sharpnessSpinner);
         panel.add(new JLabel("CLAHE tiles X:"));
         panel.add(claheTilesXSpinner);
         panel.add(new JLabel("CLAHE clip:"));
@@ -137,8 +137,8 @@ public class SnapshotterFrame extends JFrame {
     private void syncParams() {
         CURRENT_PARAMS.set(new DitherParams(
                 (DiffusionMatrix) matrixCombo.getSelectedItem(),
-                (double) ditheringGammaSpinner.getValue(),
                 (double) preDitheringGammaSpinner.getValue(),
+                (double) sharpnessSpinner.getValue(),
                 (int) claheTilesXSpinner.getValue(),
                 (double) claheClipLimitSpinner.getValue()
         ));
