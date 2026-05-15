@@ -9,6 +9,7 @@ import javax.swing.JComboBox;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
 import javax.swing.JSpinner;
 import javax.swing.JTextPane;
 import javax.swing.JToggleButton;
@@ -29,6 +30,7 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
 import java.awt.RenderingHints;
@@ -56,6 +58,8 @@ public class TextPrintPanel extends JPanel {
     private final JTextPane editor;
     private final RTFEditorKit rtfKit = new RTFEditorKit();
     private final Timer autoSaveTimer;
+    private final Timer previewTimer;
+    private final PreviewPanel previewPanel;
 
     // toolbar controls
     private final JToggleButton boldButton;
@@ -146,26 +150,60 @@ public class TextPrintPanel extends JPanel {
         toolbar.add(saveButton);
         toolbar.add(printButton);
 
-        JScrollPane scrollPane = new JScrollPane(editor);
-        scrollPane.setPreferredSize(new Dimension(800, 512));
+        JScrollPane editorScrollPane = new JScrollPane(editor);
+        editorScrollPane.setPreferredSize(new Dimension(400, 512));
+
+        previewPanel = new PreviewPanel();
+        JScrollPane previewScrollPane = new JScrollPane(previewPanel);
+        previewScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_ALWAYS);
+        previewScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        int sbWidth = previewScrollPane.getVerticalScrollBar().getPreferredSize().width;
+        if (sbWidth <= 0) sbWidth = 15; // fallback
+        Dimension previewSize = new Dimension(PRINTER_WIDTH + sbWidth, 512);
+        previewScrollPane.setPreferredSize(previewSize);
+        previewScrollPane.setMinimumSize(previewSize);
+        previewScrollPane.getVerticalScrollBar().setUnitIncrement(16);
+
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, editorScrollPane, previewScrollPane);
+        splitPane.setResizeWeight(1.0); // editor gets the extra space when resizing
 
         add(toolbar, BorderLayout.NORTH);
-        add(scrollPane, BorderLayout.CENTER);
+        add(splitPane, BorderLayout.CENTER);
 
         // --- Caret listener to sync toolbar state ---
         editor.addCaretListener(_ -> updateToolbarState());
 
-        // --- Auto-save with 2s debounce ---
+        // --- Live Preview & Auto-save ---
+        previewTimer = new Timer(1000, _ -> updatePreview());
+        previewTimer.setRepeats(false);
+
         autoSaveTimer = new Timer(2000, _ -> autoSave());
         autoSaveTimer.setRepeats(false);
+
         editor.getStyledDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { autoSaveTimer.restart(); }
-            @Override public void removeUpdate(DocumentEvent e) { autoSaveTimer.restart(); }
-            @Override public void changedUpdate(DocumentEvent e) { autoSaveTimer.restart(); }
+            @Override public void insertUpdate(DocumentEvent e) { restartTimers(); }
+            @Override public void removeUpdate(DocumentEvent e) { restartTimers(); }
+            @Override public void changedUpdate(DocumentEvent e) { restartTimers(); }
         });
 
         // --- Restore last content ---
         loadAutoSaved();
+        updatePreview();
+    }
+
+    private void restartTimers() {
+        previewTimer.restart();
+        autoSaveTimer.restart();
+    }
+
+    private void updatePreview() {
+        SwingUtilities.invokeLater(() -> {
+            BufferedImage image = renderEditorToImage();
+            if (image != null) {
+                BufferedImage dithered = Dithering.toDitheredImage(image, currentParams.get());
+                previewPanel.setImage(dithered);
+            }
+        });
     }
 
     private void setupShortcuts() {
@@ -362,6 +400,36 @@ public class TextPrintPanel extends JPanel {
     /** Save content before shutdown. */
     public void saveBeforeShutdown() {
         autoSaveTimer.stop();
+        previewTimer.stop();
         autoSave();
+    }
+
+    /**
+     * Panel to display the dithered preview at actual size.
+     */
+    private static class PreviewPanel extends JPanel {
+        private BufferedImage image;
+
+        void setImage(BufferedImage img) {
+            this.image = img;
+            if (img != null) {
+                setPreferredSize(new Dimension(img.getWidth(), img.getHeight()));
+            }
+            revalidate();
+            repaint();
+        }
+
+        @Override
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            if (image != null) {
+                g.drawImage(image, 0, 0, null);
+            } else {
+                g.setColor(Color.LIGHT_GRAY);
+                g.fillRect(0, 0, getWidth(), getHeight());
+                g.setColor(Color.DARK_GRAY);
+                g.drawString("No preview available", 20, 30);
+            }
+        }
     }
 }

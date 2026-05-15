@@ -296,27 +296,27 @@ class DitherPipelineTest {
         }
     }
 
-    // --- transpose ---
+    // --- rotate90CW ---
 
     @Test
-    void transpose_3x5_flips() {
+    void rotate90CW_3x5_flipsAndRotates() {
         int[][] matrix = {
                 {1, 2, 3, 4, 5},
                 {6, 7, 8, 9, 10},
                 {11, 12, 13, 14, 15}
         };
-        int[][] result = Dithering.transpose(matrix);
+        int[][] result = Dithering.rotate90CW(matrix);
         assertThat(result).hasNumberOfRows(5);
         assertThat(result[0]).hasSize(3);
-        assertThat(result[0][0]).isEqualTo(1);
-        assertThat(result[4][2]).isEqualTo(15);
+        assertThat(result[0][0]).isEqualTo(11);
+        assertThat(result[4][2]).isEqualTo(5);
         assertThat(result[2][1]).isEqualTo(8);
     }
 
     @Test
-    void transpose_singleRow_becomesSingleColumn() {
+    void rotate90CW_singleRow_becomesSingleColumn() {
         int[][] matrix = {{1, 2, 3}};
-        int[][] result = Dithering.transpose(matrix);
+        int[][] result = Dithering.rotate90CW(matrix);
         assertThat(result).hasNumberOfRows(3);
         assertThat(result[0]).containsExactly(1);
         assertThat(result[1]).containsExactly(2);
@@ -324,23 +324,23 @@ class DitherPipelineTest {
     }
 
     @Test
-    void transpose_singleElement() {
+    void rotate90CW_singleElement() {
         int[][] matrix = {{42}};
-        int[][] result = Dithering.transpose(matrix);
+        int[][] result = Dithering.rotate90CW(matrix);
         assertThat(result).isDeepEqualTo(new int[][]{{42}});
     }
 
     @Test
-    void transpose_square_symmetric() {
+    void rotate90CW_square() {
         int[][] matrix = {{1, 2}, {3, 4}};
-        int[][] result = Dithering.transpose(matrix);
-        assertThat(result).isDeepEqualTo(new int[][]{{1, 3}, {2, 4}});
+        int[][] result = Dithering.rotate90CW(matrix);
+        assertThat(result).isDeepEqualTo(new int[][]{{3, 1}, {4, 2}});
     }
 
     @Test
-    void transpose_doubleTranspose_identity() {
+    void rotate90CW_quadrupleRotate_identity() {
         int[][] matrix = {{1, 2, 3}, {4, 5, 6}};
-        int[][] result = Dithering.transpose(Dithering.transpose(matrix));
+        int[][] result = Dithering.rotate90CW(Dithering.rotate90CW(Dithering.rotate90CW(Dithering.rotate90CW(matrix))));
         assertThat(result).isDeepEqualTo(matrix);
     }
 
@@ -466,18 +466,18 @@ class DitherPipelineTest {
     }
 
     @Test
-    void toDitheredChunks_landscape_transposesOutput() {
+    void toDitheredChunks_landscape_rotatesOutput() {
         BufferedImage image = gradientImage(100, 50); // wider than tall
         var params = DitherParams.defaults();
         List<BufferedImage> chunks = Dithering.toDitheredChunks(image, params);
-        // After transpose, height and width swap: 100x50 → 50x100, single chunk (50<200)
+        // After rotate, height and width swap: 100x50 → 50x100, single chunk (50<200)
         assertThat(chunks).hasSize(1);
         assertThat(chunks.getFirst().getWidth()).isEqualTo(50);
         assertThat(chunks.getFirst().getHeight()).isEqualTo(100);
     }
 
     @Test
-    void toDitheredChunksPortrait_noTranspose() {
+    void toDitheredChunksPortrait_noRotate() {
         BufferedImage image = gradientImage(100, 50);
         var params = DitherParams.defaults();
         List<BufferedImage> chunks = Dithering.toDitheredChunksPortrait(image, params);

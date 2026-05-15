@@ -160,11 +160,12 @@ public class SnapshotterFrame extends JFrame {
 
         // Tabbed pane for mode switching
         tabbedPane = new JTabbedPane();
-        tabbedPane.addTab("Photo", photoPanel);
+        tabbedPane.addTab("Webcam", photoPanel);
         tabbedPane.addTab("Image", imageFilePanel);
         tabbedPane.addTab("Text", textPrintPanel);
         tabbedPane.addChangeListener(_ -> {
             int selected = tabbedPane.getSelectedIndex();
+            settingsStore.saveLastTab(selected);
             cameraPaused.set(selected != 0);
             imageTabActive.set(selected == 1);
             // Reparent shared params panel to active tab and sync visibility
@@ -176,6 +177,8 @@ public class SnapshotterFrame extends JFrame {
                 updateImageLayout();
             }
         });
+
+        tabbedPane.setSelectedIndex(Math.min(settingsStore.loadLastTab(), tabbedPane.getTabCount() - 1));
 
         setLayout(new BorderLayout());
         add(tabbedPane, BorderLayout.CENTER);

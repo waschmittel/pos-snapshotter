@@ -80,6 +80,17 @@ class SettingsStoreTest {
     }
 
     @Test
+    void lastTab_defaultIsZero() {
+        assertThat(store.loadLastTab()).isEqualTo(0);
+    }
+
+    @Test
+    void lastTab_saveAndLoad() {
+        store.saveLastTab(2);
+        assertThat(store.loadLastTab()).isEqualTo(2);
+    }
+
+    @Test
     void saveThenLoad_allDiffusionMatrices() {
         for (DiffusionMatrix matrix : DiffusionMatrix.values()) {
             var params = new DitherParams(matrix, 0.8, 3.0, 1.0, 12, 5, 1.0);

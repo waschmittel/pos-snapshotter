@@ -61,4 +61,12 @@ public class SettingsStore {
     public void saveLastImageDirectory(String path) {
         prefs.put("lastImageDirectory", path);
     }
+
+    public int loadLastTab() {
+        return prefs.getInt("lastTab", 0);
+    }
+
+    public void saveLastTab(int index) {
+        prefs.putInt("lastTab", index);
+    }
 }
