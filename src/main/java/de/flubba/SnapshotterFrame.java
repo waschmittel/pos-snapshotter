@@ -1,5 +1,6 @@
 package de.flubba;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import lombok.extern.slf4j.Slf4j;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.FrameGrabber;
@@ -107,15 +108,14 @@ public class SnapshotterFrame extends JFrame {
         previewPanel = new ImagePanel("Dithering preview...");
         previewPanel.setPreferredSize(new Dimension(grabber.getImageWidth(), grabber.getImageHeight()));
 
-        captureButton = createActionButton("Take Photo");
+        captureButton = createActionButton("Take Photo", "icons/camera.svg");
         captureButton.addActionListener(_ -> startCountdown());
 
-        JButton settingsButton = new JButton("Settings \u25B6");
-        settingsButton.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        JButton settingsButton = new JButton(new FlatSVGIcon("icons/settings.svg", 16, 16));
+        settingsButton.setToolTipText("Settings");
         settingsButton.setFocusPainted(false);
         settingsButton.addActionListener(_ -> {
             settingsExpanded = !settingsExpanded;
-            settingsButton.setText(settingsExpanded ? "\u25C0 Settings" : "Settings \u25B6");
             updateLayout();
         });
 
@@ -266,7 +266,7 @@ public class SnapshotterFrame extends JFrame {
         root.add(clahePanel, gbc);
         gbc.gridy++;
 
-        JButton resetButton = new JButton("Reset to Defaults");
+        JButton resetButton = new JButton("Reset to Defaults", new FlatSVGIcon("icons/reset.svg", 16, 16));
         resetButton.addActionListener(_ -> resetToDefaults());
         gbc.insets = new Insets(8, 4, 0, 4);
         root.add(resetButton, gbc);
@@ -342,19 +342,18 @@ public class SnapshotterFrame extends JFrame {
         imagePanelsContainer = new JPanel(new GridLayout(1, 1));
         imagePanelsContainer.add(sourceImagePanel);
 
-        JButton loadButton = new JButton("Load Image...");
+        JButton loadButton = new JButton("Load Image...", new FlatSVGIcon("icons/open.svg", 16, 16));
         loadButton.setFont(new Font("SansSerif", Font.BOLD, 16));
         loadButton.addActionListener(_ -> loadImageFromFile());
 
-        JButton printButton = createActionButton("Print Image");
+        JButton printButton = createActionButton("Print Image", "icons/print.svg");
         printButton.addActionListener(_ -> printFileImage());
 
-        JButton imageSettingsButton = new JButton("Settings \u25B6");
-        imageSettingsButton.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        JButton imageSettingsButton = new JButton(new FlatSVGIcon("icons/settings.svg", 16, 16));
+        imageSettingsButton.setToolTipText("Settings");
         imageSettingsButton.setFocusPainted(false);
         imageSettingsButton.addActionListener(_ -> {
             imageSettingsExpanded = !imageSettingsExpanded;
-            imageSettingsButton.setText(imageSettingsExpanded ? "\u25C0 Settings" : "Settings \u25B6");
             updateImageLayout();
         });
 
@@ -588,8 +587,8 @@ public class SnapshotterFrame extends JFrame {
         void run() throws Exception;
     }
 
-    static JButton createActionButton(String text) {
-        JButton button = new JButton(text);
+    static JButton createActionButton(String text, String iconPath) {
+        JButton button = new JButton(text, new FlatSVGIcon(iconPath, 32, 32));
         button.setFont(new Font("SansSerif", Font.BOLD, 32));
         button.setPreferredSize(new Dimension(0, 80));
         button.setOpaque(true);

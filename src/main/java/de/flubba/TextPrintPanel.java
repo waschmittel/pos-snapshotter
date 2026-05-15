@@ -1,5 +1,6 @@
 package de.flubba;
 
+import com.formdev.flatlaf.extras.FlatSVGIcon;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.swing.BorderFactory;
@@ -29,7 +30,11 @@ import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
 import java.awt.RenderingHints;
+import java.awt.Toolkit;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.FileInputStream;
@@ -39,6 +44,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
+import javax.swing.AbstractAction;
+import javax.swing.KeyStroke;
 
 @Slf4j
 public class TextPrintPanel extends JPanel {
@@ -66,50 +73,62 @@ public class TextPrintPanel extends JPanel {
         editor.setFont(new Font("Serif", Font.PLAIN, 16));
         editor.setContentType("text/rtf");
 
+        // --- Shortcuts ---
+        setupShortcuts();
+
         // --- Toolbar ---
-        boldButton = new JToggleButton("B");
-        boldButton.setFont(new Font("Serif", Font.BOLD, 14));
-        boldButton.setToolTipText("Bold");
+        boldButton = new JToggleButton(new FlatSVGIcon("icons/bold.svg", 16, 16));
+        boldButton.setToolTipText("Bold (Ctrl+B)");
         boldButton.addActionListener(_ -> applyStyle(StyleConstants.Bold, boldButton.isSelected()));
 
-        italicButton = new JToggleButton("I");
-        italicButton.setFont(new Font("Serif", Font.ITALIC, 14));
-        italicButton.setToolTipText("Italic");
+        italicButton = new JToggleButton(new FlatSVGIcon("icons/italic.svg", 16, 16));
+        italicButton.setToolTipText("Italic (Ctrl+I)");
         italicButton.addActionListener(_ -> applyStyle(StyleConstants.Italic, italicButton.isSelected()));
 
-        underlineButton = new JToggleButton("U");
-        underlineButton.setFont(new Font("Serif", Font.PLAIN, 14));
-        underlineButton.setToolTipText("Underline");
+        underlineButton = new JToggleButton(new FlatSVGIcon("icons/underline.svg", 16, 16));
+        underlineButton.setToolTipText("Underline (Ctrl+U)");
         underlineButton.addActionListener(_ -> applyStyle(StyleConstants.Underline, underlineButton.isSelected()));
 
         fontSizeSpinner = new JSpinner(new SpinnerNumberModel(16, 8, 72, 1));
         fontSizeSpinner.setToolTipText("Font size");
         fontSizeSpinner.addChangeListener(_ -> applyStyle(StyleConstants.FontSize, (int) fontSizeSpinner.getValue()));
 
-        String[] fonts = {"Serif", "SansSerif", "Monospaced"};
+        String[] fonts = GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames();
         fontFamilyCombo = new JComboBox<>(fonts);
+        fontFamilyCombo.setSelectedItem("Serif");
         fontFamilyCombo.setToolTipText("Font family");
         fontFamilyCombo.addActionListener(_ -> applyStyle(StyleConstants.FontFamily, (String) fontFamilyCombo.getSelectedItem()));
 
-        JButton alignLeftButton = new JButton("\u25C0");
+        JButton alignLeftButton = new JButton(new FlatSVGIcon("icons/align-left.svg", 16, 16));
         alignLeftButton.setToolTipText("Align left");
         alignLeftButton.addActionListener(_ -> applyAlignment(StyleConstants.ALIGN_LEFT));
 
-        JButton alignCenterButton = new JButton("\u25CF");
+        JButton alignCenterButton = new JButton(new FlatSVGIcon("icons/align-center.svg", 16, 16));
         alignCenterButton.setToolTipText("Align center");
         alignCenterButton.addActionListener(_ -> applyAlignment(StyleConstants.ALIGN_CENTER));
 
-        JButton alignRightButton = new JButton("\u25B6");
+        JButton alignRightButton = new JButton(new FlatSVGIcon("icons/align-right.svg", 16, 16));
         alignRightButton.setToolTipText("Align right");
         alignRightButton.addActionListener(_ -> applyAlignment(StyleConstants.ALIGN_RIGHT));
 
-        JButton printButton = SnapshotterFrame.createActionButton("Print");
+        JButton alignJustifyButton = new JButton(new FlatSVGIcon("icons/align-justify.svg", 16, 16));
+        alignJustifyButton.setToolTipText("Align justified");
+        alignJustifyButton.addActionListener(_ -> applyAlignment(StyleConstants.ALIGN_JUSTIFIED));
+
+        JButton printButton = new JButton("Print", new FlatSVGIcon("icons/print.svg", 16, 16));
+        printButton.setFont(new Font("SansSerif", Font.BOLD, 14));
+        printButton.setBackground(new Color(0, 120, 215));
+        printButton.setForeground(Color.WHITE);
+        printButton.setOpaque(true);
+        printButton.setBorderPainted(false);
         printButton.addActionListener(_ -> printText());
 
-        JButton openButton = new JButton("Open");
+        JButton openButton = new JButton(new FlatSVGIcon("icons/open.svg", 16, 16));
+        openButton.setToolTipText("Open");
         openButton.addActionListener(_ -> openFile());
 
-        JButton saveButton = new JButton("Save");
+        JButton saveButton = new JButton(new FlatSVGIcon("icons/save.svg", 16, 16));
+        saveButton.setToolTipText("Save");
         saveButton.addActionListener(_ -> saveFile());
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
@@ -122,6 +141,7 @@ public class TextPrintPanel extends JPanel {
         toolbar.add(alignLeftButton);
         toolbar.add(alignCenterButton);
         toolbar.add(alignRightButton);
+        toolbar.add(alignJustifyButton);
         toolbar.add(openButton);
         toolbar.add(saveButton);
         toolbar.add(printButton);
@@ -148,6 +168,34 @@ public class TextPrintPanel extends JPanel {
         loadAutoSaved();
     }
 
+    private void setupShortcuts() {
+        int mask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+
+        editor.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_B, mask), "toggle-bold");
+        editor.getActionMap().put("toggle-bold", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                boldButton.doClick();
+            }
+        });
+
+        editor.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_I, mask), "toggle-italic");
+        editor.getActionMap().put("toggle-italic", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                italicButton.doClick();
+            }
+        });
+
+        editor.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_U, mask), "toggle-underline");
+        editor.getActionMap().put("toggle-underline", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                underlineButton.doClick();
+            }
+        });
+    }
+
     private void applyStyle(Object attribute, Object value) {
         StyledDocument doc = editor.getStyledDocument();
         int start = editor.getSelectionStart();
@@ -157,10 +205,6 @@ public class TextPrintPanel extends JPanel {
             // No selection: apply to future typing via input attributes
             var attrs = new SimpleAttributeSet(editor.getInputAttributes());
             if (value instanceof Boolean b) {
-                StyleConstants.setBold(attrs, attribute == StyleConstants.Bold && b);
-                StyleConstants.setItalic(attrs, attribute == StyleConstants.Italic && b);
-                StyleConstants.setUnderline(attrs, attribute == StyleConstants.Underline && b);
-                // Only set the specific attribute being toggled
                 if (attribute == StyleConstants.Bold) StyleConstants.setBold(attrs, b);
                 if (attribute == StyleConstants.Italic) StyleConstants.setItalic(attrs, b);
                 if (attribute == StyleConstants.Underline) StyleConstants.setUnderline(attrs, b);
