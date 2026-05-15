@@ -57,7 +57,7 @@ public class Dithering {
         var activeLevels = getActiveLevels(params.grayLevels());
         var activeBytes = getActiveBytes(params.grayLevels());
         var result = applyErrorDiffusion(pixels, params, activeLevels, activeBytes);
-        var output = landscape ? transpose(result.mappedBytes()) : result.mappedBytes();
+        var output = landscape ? rotate90CW(result.mappedBytes()) : result.mappedBytes();
         return chunkAndConvertToBufferedImages(output);
     }
 
@@ -206,16 +206,16 @@ public class Dithering {
 
     // --- Image conversion ---
 
-    public static int[][] transpose(int[][] matrix) {
+    public static int[][] rotate90CW(int[][] matrix) {
         int rows = matrix.length;
         int cols = matrix[0].length;
-        int[][] transposed = new int[cols][rows];
+        int[][] rotated = new int[cols][rows];
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
-                transposed[j][i] = matrix[i][j];
+                rotated[j][rows - 1 - i] = matrix[i][j];
             }
         }
-        return transposed;
+        return rotated;
     }
 
     static ArrayList<BufferedImage> chunkAndConvertToBufferedImages(int[][] pixels) {
