@@ -38,17 +38,22 @@ public class SnapshotterFrame extends JFrame {
     private final CameraPanel cameraPanel;
     private final ImagePanel previewPanel;
     private final JButton captureButton;
+    private final JPanel paramsPanel;
+    private final JPanel panelsContainer;
+    private boolean settingsExpanded = false;
     private final FrameGrabber grabber;
     private final Java2DFrameConverter converter = new Java2DFrameConverter();
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicInteger countdown = new AtomicInteger(-1);
     private final AtomicReference<BufferedImage> lastSnapshot = new AtomicReference<>();
-    public static final AtomicReference<DitherParams> CURRENT_PARAMS = new AtomicReference<>(DitherParams.defaults());
+    public static final AtomicReference<DitherParams> CURRENT_PARAMS = new AtomicReference<>(DitherParams.load());
 
     // parameter controls
     private JComboBox<DiffusionMatrix> matrixCombo;
     private JSpinner preDitheringGammaSpinner;
     private JSpinner sharpnessSpinner;
+    private JSpinner contrastSpinner;
+    private JSpinner grayLevelsSpinner;
     private JSpinner claheTilesXSpinner;
     private JSpinner claheClipLimitSpinner;
 
@@ -82,14 +87,30 @@ public class SnapshotterFrame extends JFrame {
         captureButton.setFocusPainted(false);
         captureButton.addActionListener(_ -> startCountdown());
 
-        JPanel panels = new JPanel(new GridLayout(1, 2));
-        panels.add(cameraPanel);
-        panels.add(previewPanel);
+        JButton settingsButton = new JButton("Settings \u25B6");
+        settingsButton.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        settingsButton.setFocusPainted(false);
+        settingsButton.addActionListener(_ -> {
+            settingsExpanded = !settingsExpanded;
+            settingsButton.setText(settingsExpanded ? "\u25C0 Settings" : "Settings \u25B6");
+            updateLayout();
+        });
+
+        JPanel bottomPanel = new JPanel(new BorderLayout());
+        bottomPanel.add(captureButton, BorderLayout.CENTER);
+        bottomPanel.add(settingsButton, BorderLayout.EAST);
+
+        panelsContainer = new JPanel(new GridLayout(1, 1));
+        panelsContainer.add(cameraPanel);
+
+        paramsPanel = buildParamsPanel();
+        paramsPanel.setVisible(false);
+        previewPanel.setVisible(false);
 
         setLayout(new BorderLayout());
-        add(buildParamsPanel(), BorderLayout.NORTH);
-        add(panels, BorderLayout.CENTER);
-        add(captureButton, BorderLayout.SOUTH);
+        add(paramsPanel, BorderLayout.NORTH);
+        add(panelsContainer, BorderLayout.CENTER);
+        add(bottomPanel, BorderLayout.SOUTH);
         pack();
         setLocationRelativeTo(null);
 
@@ -98,26 +119,36 @@ public class SnapshotterFrame extends JFrame {
     }
 
     private JPanel buildParamsPanel() {
-        DitherParams defaults = DitherParams.defaults();
+        DitherParams saved = CURRENT_PARAMS.get();
 
         matrixCombo = new JComboBox<>(DiffusionMatrix.values());
-        matrixCombo.setSelectedItem(defaults.diffusionMatrix());
+        matrixCombo.setSelectedItem(saved.diffusionMatrix());
         matrixCombo.addActionListener(_ -> syncParams());
 
-        preDitheringGammaSpinner = new JSpinner(new SpinnerNumberModel(defaults.preDitheringGamma(), 0.1, 3.0, 0.1));
+        preDitheringGammaSpinner = new JSpinner(new SpinnerNumberModel(saved.preDitheringGamma(), 0.1, 3.0, 0.1));
         ((JSpinner.NumberEditor) preDitheringGammaSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
         preDitheringGammaSpinner.addChangeListener(_ -> syncParams());
 
-        sharpnessSpinner = new JSpinner(new SpinnerNumberModel(defaults.sharpness(), 0.0, 5.0, 0.1));
+        sharpnessSpinner = new JSpinner(new SpinnerNumberModel(saved.sharpness(), 0.0, 5.0, 0.1));
         ((JSpinner.NumberEditor) sharpnessSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
         sharpnessSpinner.addChangeListener(_ -> syncParams());
 
-        claheTilesXSpinner = new JSpinner(new SpinnerNumberModel(defaults.claheTilesX(), 1, 32, 1));
+        contrastSpinner = new JSpinner(new SpinnerNumberModel(saved.contrast(), 0.5, 3.0, 0.1));
+        ((JSpinner.NumberEditor) contrastSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
+        contrastSpinner.addChangeListener(_ -> syncParams());
+
+        grayLevelsSpinner = new JSpinner(new SpinnerNumberModel(saved.grayLevels(), 2, 12, 1));
+        grayLevelsSpinner.addChangeListener(_ -> syncParams());
+
+        claheTilesXSpinner = new JSpinner(new SpinnerNumberModel(saved.claheTilesX(), 1, 32, 1));
         claheTilesXSpinner.addChangeListener(_ -> syncParams());
 
-        claheClipLimitSpinner = new JSpinner(new SpinnerNumberModel(defaults.claheClipLimit(), 1.0, 8.0, 0.1));
+        claheClipLimitSpinner = new JSpinner(new SpinnerNumberModel(saved.claheClipLimit(), 1.0, 8.0, 0.1));
         ((JSpinner.NumberEditor) claheClipLimitSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
         claheClipLimitSpinner.addChangeListener(_ -> syncParams());
+
+        JButton resetButton = new JButton("Reset");
+        resetButton.addActionListener(_ -> resetToDefaults());
 
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 6));
         panel.setBorder(BorderFactory.createTitledBorder("Dithering Parameters"));
@@ -125,23 +156,60 @@ public class SnapshotterFrame extends JFrame {
         panel.add(matrixCombo);
         panel.add(new JLabel("Brightness γ:"));
         panel.add(preDitheringGammaSpinner);
+        panel.add(new JLabel("Contrast:"));
+        panel.add(contrastSpinner);
         panel.add(new JLabel("Sharpness:"));
         panel.add(sharpnessSpinner);
+        panel.add(new JLabel("Gray levels:"));
+        panel.add(grayLevelsSpinner);
         panel.add(new JLabel("CLAHE tiles X:"));
         panel.add(claheTilesXSpinner);
         panel.add(new JLabel("CLAHE clip:"));
         panel.add(claheClipLimitSpinner);
+        panel.add(resetButton);
         return panel;
     }
 
     private void syncParams() {
-        CURRENT_PARAMS.set(new DitherParams(
+        var params = new DitherParams(
                 (DiffusionMatrix) matrixCombo.getSelectedItem(),
                 (double) preDitheringGammaSpinner.getValue(),
                 (double) sharpnessSpinner.getValue(),
+                (double) contrastSpinner.getValue(),
+                (int) grayLevelsSpinner.getValue(),
                 (int) claheTilesXSpinner.getValue(),
                 (double) claheClipLimitSpinner.getValue()
-        ));
+        );
+        CURRENT_PARAMS.set(params);
+        params.save();
+    }
+
+    private void resetToDefaults() {
+        DitherParams.resetPrefs();
+        var defaults = DitherParams.defaults();
+        matrixCombo.setSelectedItem(defaults.diffusionMatrix());
+        preDitheringGammaSpinner.setValue(defaults.preDitheringGamma());
+        sharpnessSpinner.setValue(defaults.sharpness());
+        contrastSpinner.setValue(defaults.contrast());
+        grayLevelsSpinner.setValue(defaults.grayLevels());
+        claheTilesXSpinner.setValue(defaults.claheTilesX());
+        claheClipLimitSpinner.setValue(defaults.claheClipLimit());
+    }
+
+    private void updateLayout() {
+        paramsPanel.setVisible(settingsExpanded);
+        previewPanel.setVisible(settingsExpanded);
+        panelsContainer.removeAll();
+        if (settingsExpanded) {
+            ((GridLayout) panelsContainer.getLayout()).setColumns(2);
+            panelsContainer.add(cameraPanel);
+            panelsContainer.add(previewPanel);
+        } else {
+            ((GridLayout) panelsContainer.getLayout()).setColumns(1);
+            panelsContainer.add(cameraPanel);
+        }
+        panelsContainer.revalidate();
+        pack();
     }
 
     private void startCameraLoop() {

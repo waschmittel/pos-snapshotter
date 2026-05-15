@@ -43,10 +43,13 @@ public class Dithering {
         writeDebugImage(pixels, "converted_to_grayscale");
         applyCLAHE(pixels, params);
         writeDebugImage(pixels, "clahe_applied");
+        applyContrast(pixels, params.contrast());
         applySharpen(pixels, params.sharpness());
         applyGammaCorrection(pixels, params.preDitheringGamma());
         writeDebugImage(pixels, "pre_dithering_gamma_corrected");
-        var pixels255 = applyErrorDiffusionDitheringAndMapToBytes(pixels, params);
+        var activeLevels = getActiveLevels(params.grayLevels());
+        var activeBytes = getActiveBytes(params.grayLevels());
+        var pixels255 = applyErrorDiffusionDitheringAndMapToBytes(pixels, params, activeLevels, activeBytes);
         return chunkAndConvertToBufferedImages(transpose(pixels255));
     }
 
@@ -67,10 +70,11 @@ public class Dithering {
     public static BufferedImage toDitheredImage(BufferedImage image, DitherParams params) {
         var pixels = convertToGrayscale(image);
         applyCLAHE(pixels, params);
+        applyContrast(pixels, params.contrast());
         applySharpen(pixels, params.sharpness());
         applyGammaCorrection(pixels, params.preDitheringGamma());
-        applyErrorDiffusionDithering(pixels, params);
-        // pixels now contain perceptual brightness values from EMPIRICAL_LEVELS
+        var activeLevels = getActiveLevels(params.grayLevels());
+        applyErrorDiffusionDithering(pixels, params, activeLevels);
         return toImage(pixels);
     }
 
@@ -147,6 +151,39 @@ public class Dithering {
         return pixels;
     }
 
+    private static void applyContrast(double[][] pixels, double contrast) {
+        if (contrast == 1.0) return;
+        for (int y = 0; y < pixels.length; y++) {
+            for (int x = 0; x < pixels[y].length; x++) {
+                pixels[y][x] = Math.max(0.0, Math.min(1.0, 0.5 + (pixels[y][x] - 0.5) * contrast));
+            }
+        }
+    }
+
+    /**
+     * Subsample EMPIRICAL_LEVELS to the requested number of gray levels.
+     * Always includes first (black) and last (white) entries, with evenly spaced levels between.
+     */
+    static double[] getActiveLevels(int grayLevels) {
+        if (grayLevels >= EMPIRICAL_LEVELS.length) return EMPIRICAL_LEVELS;
+        var levels = new double[grayLevels];
+        for (int i = 0; i < grayLevels; i++) {
+            int srcIndex = Math.round((float) i * (EMPIRICAL_LEVELS.length - 1) / (grayLevels - 1));
+            levels[i] = EMPIRICAL_LEVELS[srcIndex];
+        }
+        return levels;
+    }
+
+    static int[] getActiveBytes(int grayLevels) {
+        if (grayLevels >= LEVEL_TO_BYTE.length) return LEVEL_TO_BYTE;
+        var bytes = new int[grayLevels];
+        for (int i = 0; i < grayLevels; i++) {
+            int srcIndex = Math.round((float) i * (LEVEL_TO_BYTE.length - 1) / (grayLevels - 1));
+            bytes[i] = LEVEL_TO_BYTE[srcIndex];
+        }
+        return bytes;
+    }
+
     private static void applySharpen(double[][] pixels, double strength) {
         if (strength == 0.0) return;
         int height = pixels.length;
@@ -180,7 +217,7 @@ public class Dithering {
         }
     }
 
-    private static void applyErrorDiffusionDithering(double[][] pixels, DitherParams params) {
+    private static void applyErrorDiffusionDithering(double[][] pixels, DitherParams params, double[] activeLevels) {
         var matrix = params.diffusionMatrix().matrix;
 
         int width = pixels[0].length;
@@ -193,10 +230,9 @@ public class Dithering {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 double oldValue = pixels[y][x];
-                int nearestIndex = findNearestLevelIndex(oldValue);
-                double nearestValue = EMPIRICAL_LEVELS[nearestIndex];
+                int nearestIndex = findNearestLevelIndex(oldValue, activeLevels);
+                double nearestValue = activeLevels[nearestIndex];
                 double error = oldValue - nearestValue;
-                // Store perceptual brightness for preview display
                 pixels[y][x] = nearestValue;
 
                 for (int matrixY = 0; matrixY < matrixHeight; matrixY++) {
@@ -212,7 +248,8 @@ public class Dithering {
         }
     }
 
-    private static int[][] applyErrorDiffusionDitheringAndMapToBytes(double[][] pixels, DitherParams params) {
+    private static int[][] applyErrorDiffusionDitheringAndMapToBytes(double[][] pixels, DitherParams params,
+                                                                     double[] activeLevels, int[] activeBytes) {
         var result = new int[pixels.length][pixels[0].length];
         var matrix = params.diffusionMatrix().matrix;
 
@@ -226,10 +263,10 @@ public class Dithering {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 double oldValue = pixels[y][x];
-                int nearestIndex = findNearestLevelIndex(oldValue);
-                double nearestValue = EMPIRICAL_LEVELS[nearestIndex];
+                int nearestIndex = findNearestLevelIndex(oldValue, activeLevels);
+                double nearestValue = activeLevels[nearestIndex];
                 double error = oldValue - nearestValue;
-                result[y][x] = LEVEL_TO_BYTE[nearestIndex];
+                result[y][x] = activeBytes[nearestIndex];
 
                 for (int matrixY = 0; matrixY < matrixHeight; matrixY++) {
                     for (int matrixX = 0; matrixX < matrixWidth; matrixX++) {
@@ -245,11 +282,11 @@ public class Dithering {
         return result;
     }
 
-    private static int findNearestLevelIndex(double value) {
+    private static int findNearestLevelIndex(double value, double[] levels) {
         int nearestIndex = 0;
-        double minDiff = Math.abs(value - EMPIRICAL_LEVELS[0]);
-        for (int i = 1; i < EMPIRICAL_LEVELS.length; i++) {
-            double diff = Math.abs(value - EMPIRICAL_LEVELS[i]);
+        double minDiff = Math.abs(value - levels[0]);
+        for (int i = 1; i < levels.length; i++) {
+            double diff = Math.abs(value - levels[i]);
             if (diff < minDiff) {
                 minDiff = diff;
                 nearestIndex = i;
