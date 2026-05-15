@@ -53,6 +53,22 @@ public class Dithering {
         return chunkAndConvertToBufferedImages(transpose(pixels255));
     }
 
+    /**
+     * Dither and chunk for portrait printing (no transpose).
+     * Used for text printing where content is already in portrait orientation.
+     */
+    public static List<BufferedImage> toDitheredChunksPortrait(BufferedImage image, DitherParams params) throws IOException {
+        var pixels = convertToGrayscale(image);
+        applyCLAHE(pixels, params);
+        applyContrast(pixels, params.contrast());
+        applySharpen(pixels, params.sharpness());
+        applyGammaCorrection(pixels, params.preDitheringGamma());
+        var activeLevels = getActiveLevels(params.grayLevels());
+        var activeBytes = getActiveBytes(params.grayLevels());
+        var pixels255 = applyErrorDiffusionDitheringAndMapToBytes(pixels, params, activeLevels, activeBytes);
+        return chunkAndConvertToBufferedImages(pixels255); // no transpose for portrait
+    }
+
     public static int[][] transpose(int[][] matrix) {
         int rows = matrix.length;
         int cols = matrix[0].length;

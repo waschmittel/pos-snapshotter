@@ -13,6 +13,7 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
+import javax.swing.JTabbedPane;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.Timer;
 import java.awt.BorderLayout;
@@ -45,9 +46,11 @@ public class SnapshotterFrame extends JFrame {
     private FrameGrabber grabber;
     private final Java2DFrameConverter converter = new Java2DFrameConverter();
     private final AtomicBoolean running = new AtomicBoolean(true);
+    private final AtomicBoolean cameraPaused = new AtomicBoolean(false);
     private final AtomicInteger countdown = new AtomicInteger(-1);
     private final AtomicReference<BufferedImage> lastSnapshot = new AtomicReference<>();
     public static final AtomicReference<DitherParams> CURRENT_PARAMS = new AtomicReference<>(DitherParams.load());
+    private TextPrintPanel textPrintPanel;
 
     // parameter controls
     private JComboBox<DiffusionMatrix> matrixCombo;
@@ -116,10 +119,26 @@ public class SnapshotterFrame extends JFrame {
         paramsPanel.setVisible(false);
         previewPanel.setVisible(false);
 
+        // Wrap photo UI in its own panel
+        JPanel photoPanel = new JPanel(new BorderLayout());
+        photoPanel.add(paramsPanel, BorderLayout.NORTH);
+        photoPanel.add(panelsContainer, BorderLayout.CENTER);
+        photoPanel.add(bottomPanel, BorderLayout.SOUTH);
+
+        // Text print panel
+        textPrintPanel = new TextPrintPanel();
+
+        // Tabbed pane for mode switching
+        JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane.addTab("Photo", photoPanel);
+        tabbedPane.addTab("Text", textPrintPanel);
+        tabbedPane.addChangeListener(_ -> {
+            boolean photoActive = tabbedPane.getSelectedIndex() == 0;
+            cameraPaused.set(!photoActive);
+        });
+
         setLayout(new BorderLayout());
-        add(paramsPanel, BorderLayout.NORTH);
-        add(panelsContainer, BorderLayout.CENTER);
-        add(bottomPanel, BorderLayout.SOUTH);
+        add(tabbedPane, BorderLayout.CENTER);
         pack();
         setLocationRelativeTo(null);
 
@@ -286,6 +305,7 @@ public class SnapshotterFrame extends JFrame {
         Thread.ofPlatform().name("camera-loop").start(() -> {
             while (running.get()) {
                 try {
+                    if (cameraPaused.get()) { Thread.sleep(200); continue; }
                     var currentGrabber = grabber;
                     if (currentGrabber == null) { Thread.sleep(200); continue; }
                     Frame frame = currentGrabber.grab();
@@ -318,6 +338,7 @@ public class SnapshotterFrame extends JFrame {
         Thread.ofVirtual().name("dithering-loop").start(() -> {
             while (running.get()) {
                 try {
+                    if (cameraPaused.get()) { Thread.sleep(200); continue; }
                     BufferedImage image = cameraPanel.getCurrentImage();
                     if (image != null) {
                         BufferedImage dithered = Dithering.toDitheredImage(image, CURRENT_PARAMS.get());
@@ -377,6 +398,7 @@ public class SnapshotterFrame extends JFrame {
 
     private void shutdown() {
         running.set(false);
+        textPrintPanel.saveBeforeShutdown();
         try {
             if (grabber != null) {
                 grabber.stop();
