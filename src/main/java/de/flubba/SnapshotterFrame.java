@@ -29,8 +29,12 @@ import java.awt.RenderingHints;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import javax.imageio.ImageIO;
+import javax.swing.JFileChooser;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -51,6 +55,13 @@ public class SnapshotterFrame extends JFrame {
     private final AtomicReference<BufferedImage> lastSnapshot = new AtomicReference<>();
     public static final AtomicReference<DitherParams> CURRENT_PARAMS = new AtomicReference<>(DitherParams.load());
     private TextPrintPanel textPrintPanel;
+    private final ImagePanel sourceImagePanel;
+    private final ImagePanel imageDitheredPreview;
+    private JPanel imagePanelsContainer;
+    private JPanel imageFilePanel;
+    private boolean imageSettingsExpanded = false;
+    private final AtomicBoolean imageTabActive = new AtomicBoolean(false);
+    private JTabbedPane tabbedPane;
 
     // parameter controls
     private JComboBox<DiffusionMatrix> matrixCombo;
@@ -125,16 +136,33 @@ public class SnapshotterFrame extends JFrame {
         photoPanel.add(panelsContainer, BorderLayout.CENTER);
         photoPanel.add(bottomPanel, BorderLayout.SOUTH);
 
+        // Image file panel
+        sourceImagePanel = new ImagePanel("No image loaded");
+        sourceImagePanel.setPreferredSize(new Dimension(910, 512));
+        imageDitheredPreview = new ImagePanel("Dithering preview...");
+        imageDitheredPreview.setPreferredSize(new Dimension(910, 512));
+        imageFilePanel = buildImageFilePanel();
+
         // Text print panel
         textPrintPanel = new TextPrintPanel();
 
         // Tabbed pane for mode switching
-        JTabbedPane tabbedPane = new JTabbedPane();
+        tabbedPane = new JTabbedPane();
         tabbedPane.addTab("Photo", photoPanel);
+        tabbedPane.addTab("Image", imageFilePanel);
         tabbedPane.addTab("Text", textPrintPanel);
         tabbedPane.addChangeListener(_ -> {
-            boolean photoActive = tabbedPane.getSelectedIndex() == 0;
-            cameraPaused.set(!photoActive);
+            int selected = tabbedPane.getSelectedIndex();
+            cameraPaused.set(selected != 0);
+            imageTabActive.set(selected == 1);
+            // Reparent shared params panel to active tab
+            if (selected == 0) {
+                photoPanel.add(paramsPanel, BorderLayout.NORTH);
+                photoPanel.revalidate();
+            } else if (selected == 1) {
+                imageFilePanel.add(paramsPanel, BorderLayout.NORTH);
+                imageFilePanel.revalidate();
+            }
         });
 
         setLayout(new BorderLayout());
@@ -144,6 +172,7 @@ public class SnapshotterFrame extends JFrame {
 
         startCameraLoop();
         startDitheringLoop();
+        startImageDitheringLoop();
     }
 
     private JPanel buildParamsPanel() {
@@ -196,6 +225,105 @@ public class SnapshotterFrame extends JFrame {
         panel.add(claheClipLimitSpinner);
         panel.add(resetButton);
         return panel;
+    }
+
+    private JPanel buildImageFilePanel() {
+        imagePanelsContainer = new JPanel(new GridLayout(1, 1));
+        imagePanelsContainer.add(sourceImagePanel);
+
+        JButton loadButton = new JButton("Load Image...");
+        loadButton.setFont(new Font("SansSerif", Font.BOLD, 16));
+        loadButton.addActionListener(_ -> loadImageFromFile());
+
+        JButton printButton = new JButton("Print Image");
+        printButton.setFont(new Font("SansSerif", Font.BOLD, 32));
+        printButton.setPreferredSize(new Dimension(0, 80));
+        printButton.setOpaque(true);
+        printButton.setBorderPainted(false);
+        printButton.setBackground(new Color(0, 120, 215));
+        printButton.setForeground(Color.WHITE);
+        printButton.setFocusPainted(false);
+        printButton.addActionListener(_ -> printFileImage());
+
+        JButton imageSettingsButton = new JButton("Settings \u25B6");
+        imageSettingsButton.setFont(new Font("SansSerif", Font.PLAIN, 14));
+        imageSettingsButton.setFocusPainted(false);
+        imageSettingsButton.addActionListener(_ -> {
+            imageSettingsExpanded = !imageSettingsExpanded;
+            imageSettingsButton.setText(imageSettingsExpanded ? "\u25C0 Settings" : "Settings \u25B6");
+            updateImageLayout();
+        });
+
+        JPanel imageRightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        imageRightPanel.add(loadButton);
+        imageRightPanel.add(imageSettingsButton);
+
+        JPanel imageBottomPanel = new JPanel(new BorderLayout());
+        imageBottomPanel.add(printButton, BorderLayout.CENTER);
+        imageBottomPanel.add(imageRightPanel, BorderLayout.EAST);
+
+        JPanel panel = new JPanel(new BorderLayout());
+        // paramsPanel will be reparented here when tab is active
+        panel.add(imagePanelsContainer, BorderLayout.CENTER);
+        panel.add(imageBottomPanel, BorderLayout.SOUTH);
+        return panel;
+    }
+
+    private void loadImageFromFile() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setFileFilter(new FileNameExtensionFilter("Image files", "png", "jpg", "jpeg", "bmp", "gif"));
+        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+            try {
+                BufferedImage raw = ImageIO.read(chooser.getSelectedFile());
+                if (raw != null) {
+                    // Scale to 910x512 preserving aspect ratio, letterboxed
+                    BufferedImage scaled = new BufferedImage(910, 512, BufferedImage.TYPE_3BYTE_BGR);
+                    Graphics2D g2 = scaled.createGraphics();
+                    g2.setColor(Color.BLACK);
+                    g2.fillRect(0, 0, 910, 512);
+                    double scale = Math.min(910.0 / raw.getWidth(), 512.0 / raw.getHeight());
+                    int w = (int) (raw.getWidth() * scale);
+                    int h = (int) (raw.getHeight() * scale);
+                    int x = (910 - w) / 2;
+                    int y = (512 - h) / 2;
+                    g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                    g2.drawImage(raw, x, y, w, h, null);
+                    g2.dispose();
+                    sourceImagePanel.updateImage(scaled);
+                    log.info("Loaded image from file: {} ({}x{} → 910x512)", chooser.getSelectedFile().getName(), raw.getWidth(), raw.getHeight());
+                }
+            } catch (IOException e) {
+                log.error("Failed to load image", e);
+            }
+        }
+    }
+
+    private void printFileImage() {
+        BufferedImage image = sourceImagePanel.getCurrentImage();
+        if (image == null) return;
+        try {
+            var chunks = Dithering.toDitheredChunks(image, CURRENT_PARAMS.get());
+            Main.printIt(chunks);
+            log.info("Printed image from file");
+        } catch (IOException e) {
+            log.error("Failed to print image", e);
+        }
+    }
+
+    private void updateImageLayout() {
+        imageDitheredPreview.setVisible(imageSettingsExpanded);
+        paramsPanel.setVisible(imageSettingsExpanded);
+        imagePanelsContainer.removeAll();
+        if (imageSettingsExpanded) {
+            ((GridLayout) imagePanelsContainer.getLayout()).setColumns(2);
+            imagePanelsContainer.add(sourceImagePanel);
+            imagePanelsContainer.add(imageDitheredPreview);
+        } else {
+            ((GridLayout) imagePanelsContainer.getLayout()).setColumns(1);
+            imagePanelsContainer.add(sourceImagePanel);
+        }
+        imagePanelsContainer.revalidate();
+        pack();
     }
 
     private void syncParams() {
@@ -351,6 +479,27 @@ public class SnapshotterFrame extends JFrame {
                     break;
                 } catch (Exception e) {
                     log.error("Error dithering frame", e);
+                }
+            }
+        });
+    }
+
+    private void startImageDitheringLoop() {
+        Thread.ofVirtual().name("image-dithering-loop").start(() -> {
+            while (running.get()) {
+                try {
+                    if (!imageTabActive.get()) { Thread.sleep(200); continue; }
+                    BufferedImage image = sourceImagePanel.getCurrentImage();
+                    if (image != null) {
+                        BufferedImage dithered = Dithering.toDitheredImage(image, CURRENT_PARAMS.get());
+                        imageDitheredPreview.updateImage(dithered);
+                    }
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    log.error("Error dithering file image", e);
                 }
             }
         });
