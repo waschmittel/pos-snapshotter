@@ -12,20 +12,29 @@ import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JSlider;
 import javax.swing.JSpinner;
 import javax.swing.JTabbedPane;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingConstants;
 import javax.swing.Timer;
+import javax.swing.border.TitledBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.GridLayout;
+import java.awt.Insets;
 import java.awt.RenderingHints;
+import java.awt.Toolkit;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
@@ -45,6 +54,7 @@ public class SnapshotterFrame extends JFrame {
     private final ImagePanel previewPanel;
     private final JButton captureButton;
     private final JPanel paramsPanel;
+    private final JScrollPane paramsScrollPane;
     private final JPanel panelsContainer;
     private boolean settingsExpanded = false;
     private FrameGrabber grabber;
@@ -68,11 +78,15 @@ public class SnapshotterFrame extends JFrame {
     // parameter controls
     private JComboBox<DiffusionMatrix> matrixCombo;
     private JSpinner preDitheringGammaSpinner;
+    private JSlider preDitheringGammaSlider;
     private JSpinner sharpnessSpinner;
+    private JSlider sharpnessSlider;
     private JSpinner contrastSpinner;
+    private JSlider contrastSlider;
     private JSpinner grayLevelsSpinner;
     private JSpinner claheTilesXSpinner;
     private JSpinner claheClipLimitSpinner;
+    private JSlider claheClipLimitSlider;
 
     public SnapshotterFrame() throws FrameGrabber.Exception {
         super("POS Snapshotter");
@@ -122,20 +136,23 @@ public class SnapshotterFrame extends JFrame {
         panelsContainer.add(cameraPanel);
 
         paramsPanel = buildParamsPanel();
-        paramsPanel.setVisible(false);
+        paramsScrollPane = new JScrollPane(paramsPanel);
+        paramsScrollPane.setBorder(BorderFactory.createEmptyBorder());
+        paramsScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        paramsScrollPane.setVisible(false);
         previewPanel.setVisible(false);
 
         // Wrap photo UI in its own panel
         JPanel photoPanel = new JPanel(new BorderLayout());
-        photoPanel.add(paramsPanel, BorderLayout.NORTH);
+        photoPanel.add(paramsScrollPane, BorderLayout.WEST);
         photoPanel.add(panelsContainer, BorderLayout.CENTER);
         photoPanel.add(bottomPanel, BorderLayout.SOUTH);
 
         // Image file panel
         sourceImagePanel = new ImagePanel("No image loaded");
-        sourceImagePanel.setPreferredSize(new Dimension(910, 512));
+        sourceImagePanel.setPreferredSize(new Dimension(640, 427));
         imageDitheredPreview = new ImagePanel("Dithering preview...");
-        imageDitheredPreview.setPreferredSize(new Dimension(910, 512));
+        imageDitheredPreview.setPreferredSize(new Dimension(640, 427));
         imageFilePanel = buildImageFilePanel();
 
         // Text print panel
@@ -150,19 +167,19 @@ public class SnapshotterFrame extends JFrame {
             int selected = tabbedPane.getSelectedIndex();
             cameraPaused.set(selected != 0);
             imageTabActive.set(selected == 1);
-            // Reparent shared params panel to active tab
+            // Reparent shared params panel to active tab and sync visibility
             if (selected == 0) {
-                photoPanel.add(paramsPanel, BorderLayout.NORTH);
-                photoPanel.revalidate();
+                photoPanel.add(paramsScrollPane, BorderLayout.WEST);
+                updateLayout();
             } else if (selected == 1) {
-                imageFilePanel.add(paramsPanel, BorderLayout.NORTH);
-                imageFilePanel.revalidate();
+                imageFilePanel.add(paramsScrollPane, BorderLayout.WEST);
+                updateImageLayout();
             }
         });
 
         setLayout(new BorderLayout());
         add(tabbedPane, BorderLayout.CENTER);
-        pack();
+        smartPack();
         setLocationRelativeTo(null);
 
         startCameraLoop();
@@ -170,56 +187,155 @@ public class SnapshotterFrame extends JFrame {
         startImageDitheringLoop();
     }
 
+    private void smartPack() {
+        pack();
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        Dimension current = getSize();
+        boolean resized = false;
+        int newW = current.width;
+        int newH = current.height;
+        if (current.width > screen.width * 0.95) {
+            newW = (int) (screen.width * 0.95);
+            resized = true;
+        }
+        if (current.height > screen.height * 0.9) {
+            newH = (int) (screen.height * 0.9);
+            resized = true;
+        }
+        if (resized) {
+            setSize(newW, newH);
+        }
+    }
+
     private JPanel buildParamsPanel() {
         DitherParams saved = currentParams.get();
+        JPanel root = new JPanel(new GridBagLayout());
+        root.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        gbc.insets = new Insets(0, 0, 8, 0);
 
+        // --- General ---
+        JPanel generalPanel = createGroupPanel("General");
         matrixCombo = new JComboBox<>(DiffusionMatrix.values());
         matrixCombo.setSelectedItem(saved.diffusionMatrix());
         matrixCombo.addActionListener(_ -> syncParams());
-
-        preDitheringGammaSpinner = new JSpinner(new SpinnerNumberModel(saved.preDitheringGamma(), 0.1, 3.0, 0.1));
-        ((JSpinner.NumberEditor) preDitheringGammaSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
-        preDitheringGammaSpinner.addChangeListener(_ -> syncParams());
-
-        sharpnessSpinner = new JSpinner(new SpinnerNumberModel(saved.sharpness(), 0.0, 5.0, 0.1));
-        ((JSpinner.NumberEditor) sharpnessSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
-        sharpnessSpinner.addChangeListener(_ -> syncParams());
-
-        contrastSpinner = new JSpinner(new SpinnerNumberModel(saved.contrast(), 0.5, 3.0, 0.1));
-        ((JSpinner.NumberEditor) contrastSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
-        contrastSpinner.addChangeListener(_ -> syncParams());
+        addSettingRow(generalPanel, "Diffusion:", matrixCombo, 0);
 
         grayLevelsSpinner = new JSpinner(new SpinnerNumberModel(saved.grayLevels(), 2, 12, 1));
         grayLevelsSpinner.addChangeListener(_ -> syncParams());
+        addSettingRow(generalPanel, "Gray levels:", grayLevelsSpinner, 1);
 
+        root.add(generalPanel, gbc);
+        gbc.gridy++;
+
+        // --- Image Adjustments ---
+        JPanel adjustPanel = createGroupPanel("Image Adjustments");
+        preDitheringGammaSlider = new JSlider(1, 30, (int) (saved.preDitheringGamma() * 10));
+        preDitheringGammaSpinner = new JSpinner(new SpinnerNumberModel(saved.preDitheringGamma(), 0.1, 3.0, 0.1));
+        linkSliderSpinner(preDitheringGammaSlider, preDitheringGammaSpinner, 10.0);
+        addSettingRow(adjustPanel, "Brightness \u03B3:", preDitheringGammaSlider, preDitheringGammaSpinner, 0);
+
+        contrastSlider = new JSlider(5, 30, (int) (saved.contrast() * 10));
+        contrastSpinner = new JSpinner(new SpinnerNumberModel(saved.contrast(), 0.5, 3.0, 0.1));
+        linkSliderSpinner(contrastSlider, contrastSpinner, 10.0);
+        addSettingRow(adjustPanel, "Contrast:", contrastSlider, contrastSpinner, 1);
+
+        sharpnessSlider = new JSlider(0, 50, (int) (saved.sharpness() * 10));
+        sharpnessSpinner = new JSpinner(new SpinnerNumberModel(saved.sharpness(), 0.0, 5.0, 0.1));
+        linkSliderSpinner(sharpnessSlider, sharpnessSpinner, 10.0);
+        addSettingRow(adjustPanel, "Sharpness:", sharpnessSlider, sharpnessSpinner, 2);
+
+        root.add(adjustPanel, gbc);
+        gbc.gridy++;
+
+        // --- Advanced (CLAHE) ---
+        JPanel clahePanel = createGroupPanel("Advanced (CLAHE)");
         claheTilesXSpinner = new JSpinner(new SpinnerNumberModel(saved.claheTilesX(), 1, 32, 1));
         claheTilesXSpinner.addChangeListener(_ -> syncParams());
+        addSettingRow(clahePanel, "Tiles X:", claheTilesXSpinner, 0);
 
+        claheClipLimitSlider = new JSlider(10, 80, (int) (saved.claheClipLimit() * 10));
         claheClipLimitSpinner = new JSpinner(new SpinnerNumberModel(saved.claheClipLimit(), 1.0, 8.0, 0.1));
-        ((JSpinner.NumberEditor) claheClipLimitSpinner.getEditor()).getFormat().setMinimumFractionDigits(1);
-        claheClipLimitSpinner.addChangeListener(_ -> syncParams());
+        linkSliderSpinner(claheClipLimitSlider, claheClipLimitSpinner, 10.0);
+        addSettingRow(clahePanel, "Clip Limit:", claheClipLimitSlider, claheClipLimitSpinner, 1);
 
-        JButton resetButton = new JButton("Reset");
+        root.add(clahePanel, gbc);
+        gbc.gridy++;
+
+        JButton resetButton = new JButton("Reset to Defaults");
         resetButton.addActionListener(_ -> resetToDefaults());
+        gbc.insets = new Insets(8, 4, 0, 4);
+        root.add(resetButton, gbc);
 
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 6));
-        panel.setBorder(BorderFactory.createTitledBorder("Dithering Parameters"));
-        panel.add(new JLabel("Diffusion:"));
-        panel.add(matrixCombo);
-        panel.add(new JLabel("Brightness γ:"));
-        panel.add(preDitheringGammaSpinner);
-        panel.add(new JLabel("Contrast:"));
-        panel.add(contrastSpinner);
-        panel.add(new JLabel("Sharpness:"));
-        panel.add(sharpnessSpinner);
-        panel.add(new JLabel("Gray levels:"));
-        panel.add(grayLevelsSpinner);
-        panel.add(new JLabel("CLAHE tiles X:"));
-        panel.add(claheTilesXSpinner);
-        panel.add(new JLabel("CLAHE clip:"));
-        panel.add(claheClipLimitSpinner);
-        panel.add(resetButton);
+        // Push everything up
+        gbc.gridy++;
+        gbc.weighty = 1.0;
+        root.add(new JPanel(), gbc);
+
+        root.setPreferredSize(new Dimension(300, 600));
+        return root;
+    }
+
+    private JPanel createGroupPanel(String title) {
+        JPanel panel = new JPanel(new GridBagLayout());
+        TitledBorder border = BorderFactory.createTitledBorder(title);
+        border.setTitleFont(border.getTitleFont().deriveFont(Font.BOLD));
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                border,
+                BorderFactory.createEmptyBorder(4, 4, 4, 4)));
         return panel;
+    }
+
+    private void addSettingRow(JPanel panel, String labelText, Component control, int row) {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.insets = new Insets(2, 4, 2, 8);
+        panel.add(new JLabel(labelText), gbc);
+
+        gbc.gridx = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        gbc.insets = new Insets(2, 0, 2, 4);
+        panel.add(control, gbc);
+    }
+
+    private void addSettingRow(JPanel panel, String labelText, JSlider slider, JSpinner spinner, int row) {
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.anchor = GridBagConstraints.WEST;
+        gbc.insets = new Insets(2, 4, 2, 8);
+        panel.add(new JLabel(labelText), gbc);
+
+        JPanel combo = new JPanel(new BorderLayout(4, 0));
+        combo.add(slider, BorderLayout.CENTER);
+        spinner.setPreferredSize(new Dimension(60, spinner.getPreferredSize().height));
+        combo.add(spinner, BorderLayout.EAST);
+
+        gbc.gridx = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        gbc.insets = new Insets(2, 0, 2, 4);
+        panel.add(combo, gbc);
+    }
+
+    private void linkSliderSpinner(JSlider slider, JSpinner spinner, double factor) {
+        slider.addChangeListener(_ -> {
+            if (slider.getValueIsAdjusting()) {
+                spinner.setValue(slider.getValue() / factor);
+            }
+        });
+        spinner.addChangeListener(_ -> {
+            slider.setValue((int) (((Number) spinner.getValue()).doubleValue() * factor));
+            syncParams();
+        });
+        ((JSpinner.NumberEditor) spinner.getEditor()).getFormat().setMinimumFractionDigits(1);
     }
 
     private JPanel buildImageFilePanel() {
@@ -270,7 +386,7 @@ public class SnapshotterFrame extends JFrame {
             BufferedImage raw = ImageIO.read(file);
             if (raw != null) {
                 loadedOriginalImage.set(raw);
-                sourceImagePanel.updateImage(ImageScaler.scaleToFit(raw, 910, 512));
+                sourceImagePanel.updateImage(raw);
                 log.info("Loaded image from file: {} ({}x{})", file.getName(), raw.getWidth(), raw.getHeight());
             }
         } catch (IOException e) {
@@ -329,11 +445,15 @@ public class SnapshotterFrame extends JFrame {
         var defaults = DitherParams.defaults();
         matrixCombo.setSelectedItem(defaults.diffusionMatrix());
         preDitheringGammaSpinner.setValue(defaults.preDitheringGamma());
+        preDitheringGammaSlider.setValue((int) (defaults.preDitheringGamma() * 10));
         sharpnessSpinner.setValue(defaults.sharpness());
+        sharpnessSlider.setValue((int) (defaults.sharpness() * 10));
         contrastSpinner.setValue(defaults.contrast());
+        contrastSlider.setValue((int) (defaults.contrast() * 10));
         grayLevelsSpinner.setValue(defaults.grayLevels());
         claheTilesXSpinner.setValue(defaults.claheTilesX());
         claheClipLimitSpinner.setValue(defaults.claheClipLimit());
+        claheClipLimitSlider.setValue((int) (defaults.claheClipLimit() * 10));
     }
 
     private static String[] detectCameraNames() {
@@ -402,7 +522,7 @@ public class SnapshotterFrame extends JFrame {
     }
 
     private void toggleLayout(JPanel container, JPanel mainPanel, JPanel preview, boolean expanded) {
-        paramsPanel.setVisible(expanded);
+        paramsScrollPane.setVisible(expanded);
         preview.setVisible(expanded);
         container.removeAll();
         ((GridLayout) container.getLayout()).setColumns(expanded ? 2 : 1);
@@ -411,7 +531,7 @@ public class SnapshotterFrame extends JFrame {
             container.add(preview);
         }
         container.revalidate();
-        pack();
+        smartPack();
     }
 
     private void startCameraLoop() {
@@ -422,7 +542,7 @@ public class SnapshotterFrame extends JFrame {
             if (frame != null) {
                 BufferedImage image = converter.convert(frame);
                 if (image != null) {
-                    cameraPanel.updateImage(ImageScaler.scaleToFill(image, 910, 512));
+                    cameraPanel.updateImage(image);
                 }
             }
         });
@@ -505,7 +625,11 @@ public class SnapshotterFrame extends JFrame {
             lastSnapshot.set(snapshot);
             log.info("Photo captured ({}x{})", snapshot.getWidth(), snapshot.getHeight());
             try {
-                Main.printIt(Dithering.toDitheredChunks(snapshot, currentParams.get()));
+                // Scale to maximize printer area (512px wide, unlimited height)
+                // Camera images are usually landscape, so we scale height to printer width
+                // and then transpose (landscape=true).
+                BufferedImage scaled = ImageScaler.scaleToHeight(snapshot, PRINTER_WIDTH);
+                Main.printIt(Dithering.toDitheredChunks(scaled, currentParams.get()));
             } catch (IOException e) {
                 log.error("Failed to print photo", e);
             }
