@@ -36,6 +36,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.List;
 
 @Slf4j
@@ -54,8 +55,10 @@ public class TextPrintPanel extends JPanel {
     private final JToggleButton underlineButton;
     private final JSpinner fontSizeSpinner;
     private final JComboBox<String> fontFamilyCombo;
+    private final AtomicReference<DitherParams> currentParams;
 
-    public TextPrintPanel() {
+    public TextPrintPanel(AtomicReference<DitherParams> currentParams) {
+        this.currentParams = currentParams;
         setLayout(new BorderLayout());
 
         editor = new JTextPane();
@@ -99,13 +102,7 @@ public class TextPrintPanel extends JPanel {
         alignRightButton.setToolTipText("Align right");
         alignRightButton.addActionListener(_ -> applyAlignment(StyleConstants.ALIGN_RIGHT));
 
-        JButton printButton = new JButton("Print");
-        printButton.setFont(new Font("SansSerif", Font.BOLD, 16));
-        printButton.setOpaque(true);
-        printButton.setBorderPainted(false);
-        printButton.setBackground(new Color(0, 120, 215));
-        printButton.setForeground(Color.WHITE);
-        printButton.setFocusPainted(false);
+        JButton printButton = SnapshotterFrame.createActionButton("Print");
         printButton.addActionListener(_ -> printText());
 
         JButton openButton = new JButton("Open");
@@ -213,7 +210,7 @@ public class TextPrintPanel extends JPanel {
         try {
             BufferedImage image = renderEditorToImage();
             if (image == null) return;
-            var chunks = Dithering.toDitheredChunksPortrait(image, SnapshotterFrame.CURRENT_PARAMS.get());
+            var chunks = Dithering.toDitheredChunksPortrait(image, currentParams.get());
             Main.printIt(chunks);
         } catch (IOException e) {
             log.error("Error printing text", e);

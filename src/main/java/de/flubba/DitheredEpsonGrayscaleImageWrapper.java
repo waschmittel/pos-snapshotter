@@ -96,13 +96,8 @@ public class DitheredEpsonGrayscaleImageWrapper implements EscPosConst, ImageWra
                 bytes.write(xH);
                 bytes.write(yL);
                 bytes.write(yH);
-                // write bytes
+                // write raster bytes for this color layer
                 byte[] rasterBytes = ditherableEscPosImage.getRasterBytesByColorIndex(bitMapLayer).toByteArray();
-                for (int b = 0; b < rasterBytes.length; b++) {
-                    var shouldPrint = (15 / (1 << (3 - bitMapLayer))) % 2 > 0;
-                    if (!shouldPrint)
-                        rasterBytes[b] = (byte) 0;
-                }
                 bytes.write(rasterBytes, 0, rasterBytes.length);
             }
 
