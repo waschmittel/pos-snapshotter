@@ -29,6 +29,7 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,7 +42,7 @@ public class SnapshotterFrame extends JFrame {
     private final JPanel paramsPanel;
     private final JPanel panelsContainer;
     private boolean settingsExpanded = false;
-    private final FrameGrabber grabber;
+    private FrameGrabber grabber;
     private final Java2DFrameConverter converter = new Java2DFrameConverter();
     private final AtomicBoolean running = new AtomicBoolean(true);
     private final AtomicInteger countdown = new AtomicInteger(-1);
@@ -67,11 +68,8 @@ public class SnapshotterFrame extends JFrame {
             }
         });
 
-        grabber = new OpenCVFrameGrabber(0); // TODO: allow capturing from another device
-        grabber.setImageWidth(768);
-        grabber.setImageHeight(512);
-        grabber.start(); // TODO: release in finally?
-        log.info("Webcam started: {}x{}", grabber.getImageWidth(), grabber.getImageHeight());
+        int savedCamera = DitherParams.loadCameraIndex();
+        grabber = startGrabber(savedCamera);
 
         cameraPanel = new CameraPanel();
         cameraPanel.setPreferredSize(new Dimension(grabber.getImageWidth(), grabber.getImageHeight()));
@@ -82,6 +80,8 @@ public class SnapshotterFrame extends JFrame {
         captureButton = new JButton("Take Photo");
         captureButton.setFont(new Font("SansSerif", Font.BOLD, 32));
         captureButton.setPreferredSize(new Dimension(0, 80));
+        captureButton.setOpaque(true);
+        captureButton.setBorderPainted(false);
         captureButton.setBackground(new Color(0, 120, 215));
         captureButton.setForeground(Color.WHITE);
         captureButton.setFocusPainted(false);
@@ -96,9 +96,18 @@ public class SnapshotterFrame extends JFrame {
             updateLayout();
         });
 
+        String[] cameraLabels = detectCameraNames();
+        JComboBox<String> cameraCombo = new JComboBox<>(cameraLabels);
+        cameraCombo.setSelectedIndex(Math.min(savedCamera, cameraLabels.length - 1));
+        cameraCombo.addActionListener(_ -> switchCamera(cameraCombo.getSelectedIndex()));
+
+        JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+        rightPanel.add(cameraCombo);
+        rightPanel.add(settingsButton);
+
         JPanel bottomPanel = new JPanel(new BorderLayout());
         bottomPanel.add(captureButton, BorderLayout.CENTER);
-        bottomPanel.add(settingsButton, BorderLayout.EAST);
+        bottomPanel.add(rightPanel, BorderLayout.EAST);
 
         panelsContainer = new JPanel(new GridLayout(1, 1));
         panelsContainer.add(cameraPanel);
@@ -196,6 +205,67 @@ public class SnapshotterFrame extends JFrame {
         claheClipLimitSpinner.setValue(defaults.claheClipLimit());
     }
 
+    private static String[] detectCameraNames() {
+        try {
+            var process = new ProcessBuilder("system_profiler", "SPCameraDataType", "-json")
+                    .redirectErrorStream(true).start();
+            var output = new String(process.getInputStream().readAllBytes());
+            process.waitFor();
+
+            var names = new ArrayList<String>();
+            // Extract "_name" values from JSON using simple pattern matching
+            int searchFrom = 0;
+            while (true) {
+                int nameKeyPos = output.indexOf("\"_name\"", searchFrom);
+                if (nameKeyPos < 0) break;
+                int colonPos = output.indexOf(":", nameKeyPos);
+                int quoteStart = output.indexOf("\"", colonPos + 1);
+                int quoteEnd = output.indexOf("\"", quoteStart + 1);
+                if (quoteStart >= 0 && quoteEnd > quoteStart) {
+                    names.add(output.substring(quoteStart + 1, quoteEnd));
+                }
+                searchFrom = quoteEnd + 1;
+            }
+
+            if (!names.isEmpty()) {
+                return names.toArray(String[]::new);
+            }
+        } catch (Exception e) {
+            log.warn("Could not detect camera names", e);
+        }
+        // Fallback: generic labels
+        return new String[]{"Camera 0", "Camera 1", "Camera 2", "Camera 3"};
+    }
+
+    private FrameGrabber startGrabber(int deviceIndex) {
+        try {
+            var g = new OpenCVFrameGrabber(deviceIndex);
+            g.setImageWidth(768);
+            g.setImageHeight(512);
+            g.start();
+            log.info("Camera {} started: {}x{}", deviceIndex, g.getImageWidth(), g.getImageHeight());
+            return g;
+        } catch (FrameGrabber.Exception e) {
+            log.error("Failed to start camera {}", deviceIndex, e);
+            return null;
+        }
+    }
+
+    private void switchCamera(int deviceIndex) {
+        Thread.ofPlatform().name("camera-switch").start(() -> {
+            try {
+                if (grabber != null) {
+                    grabber.stop();
+                    grabber.release();
+                }
+            } catch (FrameGrabber.Exception e) {
+                log.error("Error stopping old camera", e);
+            }
+            grabber = startGrabber(deviceIndex);
+            DitherParams.saveCameraIndex(deviceIndex);
+        });
+    }
+
     private void updateLayout() {
         paramsPanel.setVisible(settingsExpanded);
         previewPanel.setVisible(settingsExpanded);
@@ -216,7 +286,9 @@ public class SnapshotterFrame extends JFrame {
         Thread.ofPlatform().name("camera-loop").start(() -> {
             while (running.get()) {
                 try {
-                    Frame frame = grabber.grab();
+                    var currentGrabber = grabber;
+                    if (currentGrabber == null) { Thread.sleep(200); continue; }
+                    Frame frame = currentGrabber.grab();
                     if (frame != null) {
                         BufferedImage image = converter.convert(frame);
                         if (image != null) {
@@ -306,8 +378,10 @@ public class SnapshotterFrame extends JFrame {
     private void shutdown() {
         running.set(false);
         try {
-            grabber.stop();
-            grabber.release();
+            if (grabber != null) {
+                grabber.stop();
+                grabber.release();
+            }
         } catch (FrameGrabber.Exception e) {
             log.error("Error stopping webcam", e);
         }

@@ -40,6 +40,14 @@ public record DitherParams(
         PREFS.putDouble("claheClipLimit", claheClipLimit);
     }
 
+    public static int loadCameraIndex() {
+        return PREFS.getInt("cameraIndex", 0);
+    }
+
+    public static void saveCameraIndex(int index) {
+        PREFS.putInt("cameraIndex", index);
+    }
+
     public static void resetPrefs() {
         PREFS.remove("diffusionMatrix");
         PREFS.remove("preDitheringGamma");
