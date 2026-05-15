@@ -29,11 +29,11 @@ import java.awt.RenderingHints;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
+import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import javax.imageio.ImageIO;
-import javax.swing.JFileChooser;
-import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.FileDialog;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -62,6 +62,7 @@ public class SnapshotterFrame extends JFrame {
     private JPanel imageFilePanel;
     private boolean imageSettingsExpanded = false;
     private final AtomicBoolean imageTabActive = new AtomicBoolean(false);
+    private final AtomicReference<BufferedImage> loadedOriginalImage = new AtomicReference<>();
     private JTabbedPane tabbedPane;
 
     // parameter controls
@@ -257,28 +258,49 @@ public class SnapshotterFrame extends JFrame {
     }
 
     private void loadImageFromFile() {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setFileFilter(new FileNameExtensionFilter("Image files", "png", "jpg", "jpeg", "bmp", "gif"));
-        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            try {
-                BufferedImage raw = ImageIO.read(chooser.getSelectedFile());
-                if (raw != null) {
-                    sourceImagePanel.updateImage(ImageScaler.scaleToFit(raw, 910, 512));
-                    log.info("Loaded image from file: {} ({}x{} → 910x512)", chooser.getSelectedFile().getName(), raw.getWidth(), raw.getHeight());
-                }
-            } catch (IOException e) {
-                log.error("Failed to load image", e);
+        var fd = new FileDialog(this, "Load Image", FileDialog.LOAD);
+        fd.setFilenameFilter((_, name) -> name.matches("(?i).*\\.(png|jpe?g|bmp|gif)$"));
+        fd.setDirectory(settingsStore.loadLastImageDirectory());
+        fd.setVisible(true);
+        if (fd.getFile() == null) return;
+
+        settingsStore.saveLastImageDirectory(fd.getDirectory());
+        var file = new File(fd.getDirectory(), fd.getFile());
+        try {
+            BufferedImage raw = ImageIO.read(file);
+            if (raw != null) {
+                loadedOriginalImage.set(raw);
+                sourceImagePanel.updateImage(ImageScaler.scaleToFit(raw, 910, 512));
+                log.info("Loaded image from file: {} ({}x{})", file.getName(), raw.getWidth(), raw.getHeight());
             }
+        } catch (IOException e) {
+            log.error("Failed to load image", e);
         }
     }
 
+    private static final int PRINTER_WIDTH = 512;
+
     private void printFileImage() {
-        BufferedImage image = sourceImagePanel.getCurrentImage();
-        if (image == null) return;
+        BufferedImage original = loadedOriginalImage.get();
+        if (original == null) return;
+
+        boolean landscape = original.getWidth() > original.getHeight();
+        // Scale to maximize printer area (512px wide, unlimited height)
+        // Landscape: transpose will swap dimensions, so scale height to printer width
+        // Portrait/square: scale width to printer width directly
+        BufferedImage scaled = landscape
+                ? ImageScaler.scaleToHeight(original, PRINTER_WIDTH)
+                : ImageScaler.scaleToWidth(original, PRINTER_WIDTH);
+
         try {
-            var chunks = Dithering.toDitheredChunks(image, currentParams.get());
+            var chunks = landscape
+                    ? Dithering.toDitheredChunks(scaled, currentParams.get())
+                    : Dithering.toDitheredChunksPortrait(scaled, currentParams.get());
             Main.printIt(chunks);
-            log.info("Printed image from file");
+            log.info("Printed image from file: {}x{} → {}x{} ({})",
+                    original.getWidth(), original.getHeight(),
+                    scaled.getWidth(), scaled.getHeight(),
+                    landscape ? "landscape, rotated" : "portrait");
         } catch (IOException e) {
             log.error("Failed to print image", e);
         }

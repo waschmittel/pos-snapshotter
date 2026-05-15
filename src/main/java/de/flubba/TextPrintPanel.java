@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
-import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -16,13 +15,15 @@ import javax.swing.SpinnerNumberModel;
 import javax.swing.Timer;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.SwingUtilities;
 import javax.swing.text.AttributeSet;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 import javax.swing.text.rtf.RTFEditorKit;
 import java.awt.BorderLayout;
+import java.awt.FileDialog;
+import java.awt.Frame;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
@@ -247,19 +248,26 @@ public class TextPrintPanel extends JPanel {
 
     // --- File I/O ---
 
+    private Frame getParentFrame() {
+        return (Frame) SwingUtilities.getWindowAncestor(this);
+    }
+
     private void openFile() {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setFileFilter(new FileNameExtensionFilter("Rich Text Files (*.rtf)", "rtf"));
-        if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-            loadRtfFile(chooser.getSelectedFile());
+        var fd = new FileDialog(getParentFrame(), "Open RTF File", FileDialog.LOAD);
+        fd.setFilenameFilter((_, name) -> name.toLowerCase().endsWith(".rtf"));
+        fd.setVisible(true);
+        if (fd.getFile() != null) {
+            loadRtfFile(new File(fd.getDirectory(), fd.getFile()));
         }
     }
 
     private void saveFile() {
-        JFileChooser chooser = new JFileChooser();
-        chooser.setFileFilter(new FileNameExtensionFilter("Rich Text Files (*.rtf)", "rtf"));
-        if (chooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
-            File file = chooser.getSelectedFile();
+        var fd = new FileDialog(getParentFrame(), "Save RTF File", FileDialog.SAVE);
+        fd.setFilenameFilter((_, name) -> name.toLowerCase().endsWith(".rtf"));
+        fd.setFile("document.rtf");
+        fd.setVisible(true);
+        if (fd.getFile() != null) {
+            var file = new File(fd.getDirectory(), fd.getFile());
             if (!file.getName().toLowerCase().endsWith(".rtf")) {
                 file = new File(file.getAbsolutePath() + ".rtf");
             }

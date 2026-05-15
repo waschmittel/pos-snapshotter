@@ -53,4 +53,12 @@ public class SettingsStore {
     public void saveCameraIndex(int index) {
         prefs.putInt("cameraIndex", index);
     }
+
+    public String loadLastImageDirectory() {
+        return prefs.get("lastImageDirectory", System.getProperty("user.home"));
+    }
+
+    public void saveLastImageDirectory(String path) {
+        prefs.put("lastImageDirectory", path);
+    }
 }

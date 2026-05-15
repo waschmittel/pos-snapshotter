@@ -5,6 +5,8 @@ import com.github.anastaciocintra.escpos.image.CoffeeImageImpl;
 import com.github.anastaciocintra.escpos.image.EscPosImage;
 import com.github.anastaciocintra.output.PrinterOutputStream;
 
+import com.formdev.flatlaf.FlatLightLaf;
+
 import javax.print.PrintService;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
@@ -13,10 +15,7 @@ import java.util.List;
 
 public class Main {
     static void main() {
-        try {
-            //javax.swing.UIManager.setLookAndFeel(javax.swing.UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception ignored) {
-        }
+        FlatLightLaf.setup();
 
         javax.swing.SwingUtilities.invokeLater(() -> {
             try {

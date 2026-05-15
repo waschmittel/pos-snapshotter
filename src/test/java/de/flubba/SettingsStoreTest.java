@@ -69,6 +69,17 @@ class SettingsStoreTest {
     }
 
     @Test
+    void lastImageDirectory_default_isUserHome() {
+        assertThat(store.loadLastImageDirectory()).isEqualTo(System.getProperty("user.home"));
+    }
+
+    @Test
+    void lastImageDirectory_saveAndLoad() {
+        store.saveLastImageDirectory("/tmp/test/images");
+        assertThat(store.loadLastImageDirectory()).isEqualTo("/tmp/test/images");
+    }
+
+    @Test
     void saveThenLoad_allDiffusionMatrices() {
         for (DiffusionMatrix matrix : DiffusionMatrix.values()) {
             var params = new DitherParams(matrix, 0.8, 3.0, 1.0, 12, 5, 1.0);

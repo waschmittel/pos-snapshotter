@@ -48,6 +48,13 @@
             <version>1.5.32</version>
         </dependency>
 
+        <!-- modern look and feel -->
+        <dependency>
+            <groupId>com.formdev</groupId>
+            <artifactId>flatlaf</artifactId>
+            <version>3.6</version>
+        </dependency>
+
         <!-- webcam access via OpenCV -->
         <dependency>
             <groupId>org.bytedeco</groupId>

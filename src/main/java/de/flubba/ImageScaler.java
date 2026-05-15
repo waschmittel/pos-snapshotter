@@ -42,4 +42,26 @@ public class ImageScaler {
         g2.dispose();
         return result;
     }
+
+    /**
+     * Scale image so width equals targetWidth, maintaining aspect ratio.
+     * Height is determined by the source aspect ratio.
+     * Used for printer output where width is fixed and height is unlimited.
+     */
+    public static BufferedImage scaleToWidth(BufferedImage source, int targetWidth) {
+        double scale = (double) targetWidth / source.getWidth();
+        int targetHeight = Math.max(1, (int) Math.round(source.getHeight() * scale));
+        return scaleToFill(source, targetWidth, targetHeight);
+    }
+
+    /**
+     * Scale image so height equals targetHeight, maintaining aspect ratio.
+     * Width is determined by the source aspect ratio.
+     * Used when a landscape image will be transposed for printing.
+     */
+    public static BufferedImage scaleToHeight(BufferedImage source, int targetHeight) {
+        double scale = (double) targetHeight / source.getHeight();
+        int targetWidth = Math.max(1, (int) Math.round(source.getWidth() * scale));
+        return scaleToFill(source, targetWidth, targetHeight);
+    }
 }

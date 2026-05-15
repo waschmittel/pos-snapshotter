@@ -101,6 +101,75 @@ class ImageScalerTest {
         assertThat(result.getHeight()).isEqualTo(512);
     }
 
+    // --- scaleToWidth ---
+
+    @Test
+    void scaleToWidth_outputHasExactWidth() {
+        BufferedImage source = new BufferedImage(200, 100, BufferedImage.TYPE_INT_RGB);
+        BufferedImage result = ImageScaler.scaleToWidth(source, 512);
+        assertThat(result.getWidth()).isEqualTo(512);
+    }
+
+    @Test
+    void scaleToWidth_maintainsAspectRatio() {
+        BufferedImage source = new BufferedImage(200, 100, BufferedImage.TYPE_INT_RGB);
+        BufferedImage result = ImageScaler.scaleToWidth(source, 512);
+        // 200:100 = 2:1, so 512 wide → 256 tall
+        assertThat(result.getHeight()).isEqualTo(256);
+    }
+
+    @Test
+    void scaleToWidth_1x1Source_noError() {
+        BufferedImage source = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+        BufferedImage result = ImageScaler.scaleToWidth(source, 512);
+        assertThat(result.getWidth()).isEqualTo(512);
+        assertThat(result.getHeight()).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    void scaleToWidth_portraitImage_tallResult() {
+        BufferedImage source = new BufferedImage(100, 400, BufferedImage.TYPE_INT_RGB);
+        BufferedImage result = ImageScaler.scaleToWidth(source, 512);
+        assertThat(result.getWidth()).isEqualTo(512);
+        // 100:400 = 1:4, so 512 wide → 2048 tall
+        assertThat(result.getHeight()).isEqualTo(2048);
+    }
+
+    // --- scaleToHeight ---
+
+    @Test
+    void scaleToHeight_outputHasExactHeight() {
+        BufferedImage source = new BufferedImage(200, 100, BufferedImage.TYPE_INT_RGB);
+        BufferedImage result = ImageScaler.scaleToHeight(source, 512);
+        assertThat(result.getHeight()).isEqualTo(512);
+    }
+
+    @Test
+    void scaleToHeight_maintainsAspectRatio() {
+        BufferedImage source = new BufferedImage(200, 100, BufferedImage.TYPE_INT_RGB);
+        BufferedImage result = ImageScaler.scaleToHeight(source, 512);
+        // 200:100 = 2:1, so 512 tall → 1024 wide
+        assertThat(result.getWidth()).isEqualTo(1024);
+    }
+
+    @Test
+    void scaleToHeight_1x1Source_noError() {
+        BufferedImage source = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
+        BufferedImage result = ImageScaler.scaleToHeight(source, 512);
+        assertThat(result.getHeight()).isEqualTo(512);
+        assertThat(result.getWidth()).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
+    void scaleToHeight_landscapeForPrinting() {
+        // Typical use: landscape 1920x1080, scale height to 512 for printing
+        BufferedImage source = new BufferedImage(1920, 1080, BufferedImage.TYPE_INT_RGB);
+        BufferedImage result = ImageScaler.scaleToHeight(source, 512);
+        assertThat(result.getHeight()).isEqualTo(512);
+        // 1920/1080 * 512 ≈ 910-911 (rounding)
+        assertThat(result.getWidth()).isBetween(910, 911);
+    }
+
     // --- Helpers ---
 
     private static void fillWhite(BufferedImage img) {
