@@ -1,35 +1,43 @@
 package de.flubba;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
+import com.formdev.flatlaf.util.SystemFileChooser;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JSplitPane;
 import javax.swing.JSpinner;
+import javax.swing.JSplitPane;
 import javax.swing.JTextPane;
 import javax.swing.JToggleButton;
+import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import javax.swing.SwingUtilities;
 import javax.swing.text.AttributeSet;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
-import javax.swing.text.rtf.RTFEditorKit;
-import com.formdev.flatlaf.util.SystemFileChooser;
+import javax.swing.text.html.HTMLDocument;
+import javax.swing.text.html.HTMLEditorKit;
 import java.awt.BorderLayout;
-import java.awt.Frame;
 import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.Frame;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
@@ -44,19 +52,18 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.List;
-import javax.swing.AbstractAction;
-import javax.swing.KeyStroke;
 
 @Slf4j
 public class TextPrintPanel extends JPanel {
     private static final Path SAVE_DIR = Path.of(System.getProperty("user.home"), ".posSnapshotter");
-    private static final Path AUTO_SAVE_FILE = SAVE_DIR.resolve("lastDocument.rtf");
+    private static final Path AUTO_SAVE_FILE = SAVE_DIR.resolve("lastDocument.html");
     private static final int PRINTER_WIDTH = 512;
 
     private final JTextPane editor;
-    private final RTFEditorKit rtfKit = new RTFEditorKit();
+    private final HTMLEditorKit htmlKit = new HTMLEditorKit();
     private final Timer autoSaveTimer;
     private final Timer previewTimer;
     private final PreviewPanel previewPanel;
@@ -69,13 +76,16 @@ public class TextPrintPanel extends JPanel {
     private final JComboBox<String> fontFamilyCombo;
     private final AtomicReference<DitherParams> currentParams;
 
+    private boolean updatingToolbar = false;
+
     public TextPrintPanel(AtomicReference<DitherParams> currentParams) {
         this.currentParams = currentParams;
         setLayout(new BorderLayout());
 
         editor = new JTextPane();
+        editor.setCaret(new PersistentCaret());
         editor.setFont(new Font("Serif", Font.PLAIN, 16));
-        editor.setContentType("text/rtf");
+        editor.setContentType("text/html");
 
         // --- Shortcuts ---
         setupShortcuts();
@@ -83,41 +93,75 @@ public class TextPrintPanel extends JPanel {
         // --- Toolbar ---
         boldButton = new JToggleButton(new FlatSVGIcon("icons/bold.svg", 16, 16));
         boldButton.setToolTipText("Bold (Ctrl+B)");
+        boldButton.setFocusable(false);
         boldButton.addActionListener(_ -> applyStyle(StyleConstants.Bold, boldButton.isSelected()));
 
         italicButton = new JToggleButton(new FlatSVGIcon("icons/italic.svg", 16, 16));
         italicButton.setToolTipText("Italic (Ctrl+I)");
+        italicButton.setFocusable(false);
         italicButton.addActionListener(_ -> applyStyle(StyleConstants.Italic, italicButton.isSelected()));
 
         underlineButton = new JToggleButton(new FlatSVGIcon("icons/underline.svg", 16, 16));
         underlineButton.setToolTipText("Underline (Ctrl+U)");
+        underlineButton.setFocusable(false);
         underlineButton.addActionListener(_ -> applyStyle(StyleConstants.Underline, underlineButton.isSelected()));
 
         fontSizeSpinner = new JSpinner(new SpinnerNumberModel(16, 8, 72, 1));
         fontSizeSpinner.setToolTipText("Font size");
-        fontSizeSpinner.addChangeListener(_ -> applyStyle(StyleConstants.FontSize, (int) fontSizeSpinner.getValue()));
+        // Only buttons non-focusable, text field stays focusable to allow typing
+        for (Component child : fontSizeSpinner.getComponents()) {
+            if (child instanceof JButton) child.setFocusable(false);
+        }
+
+        fontSizeSpinner.addChangeListener(new ChangeListener() {
+            @Override
+            public void stateChanged(ChangeEvent e) {
+                if (!updatingToolbar) {
+                    applyStyle(StyleConstants.FontSize, fontSizeSpinner.getValue());
+                }
+            }
+        });
 
         String[] fonts = GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames();
         fontFamilyCombo = new JComboBox<>(fonts);
         fontFamilyCombo.setSelectedItem("Serif");
         fontFamilyCombo.setToolTipText("Font family");
-        fontFamilyCombo.addActionListener(_ -> applyStyle(StyleConstants.FontFamily, (String) fontFamilyCombo.getSelectedItem()));
+        fontFamilyCombo.setRenderer(new FontListRenderer());
+        fontFamilyCombo.setFocusable(false);
+        fontFamilyCombo.addActionListener(_ -> {
+            if (!updatingToolbar) {
+                applyStyle(StyleConstants.FontFamily, fontFamilyCombo.getSelectedItem());
+            }
+        });
 
         JButton alignLeftButton = new JButton(new FlatSVGIcon("icons/align-left.svg", 16, 16));
         alignLeftButton.setToolTipText("Align left");
+        alignLeftButton.setFocusable(false);
         alignLeftButton.addActionListener(_ -> applyAlignment(StyleConstants.ALIGN_LEFT));
 
         JButton alignCenterButton = new JButton(new FlatSVGIcon("icons/align-center.svg", 16, 16));
         alignCenterButton.setToolTipText("Align center");
+        alignCenterButton.setFocusable(false);
         alignCenterButton.addActionListener(_ -> applyAlignment(StyleConstants.ALIGN_CENTER));
 
         JButton alignRightButton = new JButton(new FlatSVGIcon("icons/align-right.svg", 16, 16));
         alignRightButton.setToolTipText("Align right");
+        alignRightButton.setFocusable(false);
         alignRightButton.addActionListener(_ -> applyAlignment(StyleConstants.ALIGN_RIGHT));
 
         JButton alignJustifyButton = new JButton(new FlatSVGIcon("icons/align-justify.svg", 16, 16));
         alignJustifyButton.setToolTipText("Align justified");
+        alignJustifyButton.setFocusable(false);
         alignJustifyButton.addActionListener(_ -> applyAlignment(StyleConstants.ALIGN_JUSTIFIED));
+
+        JButton resetContentsButton = new JButton(new FlatSVGIcon("icons/reset.svg", 16, 16));
+        resetContentsButton.setToolTipText("Clear text");
+        resetContentsButton.setFocusable(false);
+        resetContentsButton.addActionListener(_ -> {
+            if (JOptionPane.showConfirmDialog(this, "Clear all text?", "Clear", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+                resetDocument();
+            }
+        });
 
         JButton printButton = new JButton("Print", new FlatSVGIcon("icons/print.svg", 16, 16));
         printButton.setFont(new Font("SansSerif", Font.BOLD, 14));
@@ -125,14 +169,17 @@ public class TextPrintPanel extends JPanel {
         printButton.setForeground(Color.WHITE);
         printButton.setOpaque(true);
         printButton.setBorderPainted(false);
+        printButton.setFocusable(false);
         printButton.addActionListener(_ -> printText());
 
         JButton openButton = new JButton(new FlatSVGIcon("icons/open.svg", 16, 16));
         openButton.setToolTipText("Open");
+        openButton.setFocusable(false);
         openButton.addActionListener(_ -> openFile());
 
         JButton saveButton = new JButton(new FlatSVGIcon("icons/save.svg", 16, 16));
         saveButton.setToolTipText("Save");
+        saveButton.setFocusable(false);
         saveButton.addActionListener(_ -> saveFile());
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
@@ -146,6 +193,7 @@ public class TextPrintPanel extends JPanel {
         toolbar.add(alignCenterButton);
         toolbar.add(alignRightButton);
         toolbar.add(alignJustifyButton);
+        toolbar.add(resetContentsButton);
         toolbar.add(openButton);
         toolbar.add(saveButton);
         toolbar.add(printButton);
@@ -180,10 +228,21 @@ public class TextPrintPanel extends JPanel {
         autoSaveTimer = new Timer(2000, _ -> autoSave());
         autoSaveTimer.setRepeats(false);
 
-        editor.getStyledDocument().addDocumentListener(new DocumentListener() {
-            @Override public void insertUpdate(DocumentEvent e) { restartTimers(); }
-            @Override public void removeUpdate(DocumentEvent e) { restartTimers(); }
-            @Override public void changedUpdate(DocumentEvent e) { restartTimers(); }
+        editor.getDocument().addDocumentListener(new DocumentListener() {
+            @Override
+            public void insertUpdate(DocumentEvent e) {
+                restartTimers();
+            }
+
+            @Override
+            public void removeUpdate(DocumentEvent e) {
+                restartTimers();
+            }
+
+            @Override
+            public void changedUpdate(DocumentEvent e) {
+                restartTimers();
+            }
         });
 
         // --- Restore last content ---
@@ -194,6 +253,22 @@ public class TextPrintPanel extends JPanel {
     private void restartTimers() {
         previewTimer.restart();
         autoSaveTimer.restart();
+    }
+
+    private void resetDocument() {
+        var newDoc = (HTMLDocument) htmlKit.createDefaultDocument();
+        editor.setDocument(newDoc);
+
+        // Re-attach document listener to the new instance
+        newDoc.addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { restartTimers(); }
+            @Override public void removeUpdate(DocumentEvent e) { restartTimers(); }
+            @Override public void changedUpdate(DocumentEvent e) { restartTimers(); }
+        });
+
+        // Trigger UI sync
+        updateToolbarState();
+        restartTimers();
     }
 
     private void updatePreview() {
@@ -230,6 +305,14 @@ public class TextPrintPanel extends JPanel {
             @Override
             public void actionPerformed(ActionEvent e) {
                 underlineButton.doClick();
+            }
+        });
+
+        editor.getInputMap().put(KeyStroke.getKeyStroke(KeyEvent.VK_P, mask), "print-shortcut");
+        editor.getActionMap().put("print-shortcut", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                printText();
             }
         });
     }
@@ -280,13 +363,18 @@ public class TextPrintPanel extends JPanel {
     }
 
     private void updateToolbarState() {
-        AttributeSet attrs = editor.getInputAttributes();
-        boldButton.setSelected(StyleConstants.isBold(attrs));
-        italicButton.setSelected(StyleConstants.isItalic(attrs));
-        underlineButton.setSelected(StyleConstants.isUnderline(attrs));
-        fontSizeSpinner.setValue(StyleConstants.getFontSize(attrs));
-        String family = StyleConstants.getFontFamily(attrs);
-        fontFamilyCombo.setSelectedItem(family);
+        updatingToolbar = true;
+        try {
+            AttributeSet attrs = editor.getInputAttributes();
+            boldButton.setSelected(StyleConstants.isBold(attrs));
+            italicButton.setSelected(StyleConstants.isItalic(attrs));
+            underlineButton.setSelected(StyleConstants.isUnderline(attrs));
+            fontSizeSpinner.setValue(StyleConstants.getFontSize(attrs));
+            String family = StyleConstants.getFontFamily(attrs);
+            fontFamilyCombo.setSelectedItem(family);
+        } finally {
+            updatingToolbar = false;
+        }
     }
 
     private void printText() {
@@ -303,19 +391,20 @@ public class TextPrintPanel extends JPanel {
     }
 
     private BufferedImage renderEditorToImage() {
-        StyledDocument doc = editor.getStyledDocument();
-        if (doc.getLength() == 0) return null;
+        if (editor.getDocument().getLength() == 0) return null;
 
         // Create offscreen editor at printer width
         JTextPane offscreen = new JTextPane();
-        offscreen.setStyledDocument(doc);
-        offscreen.setSize(PRINTER_WIDTH, Short.MAX_VALUE);
-        Dimension preferred = offscreen.getPreferredSize();
-        int height = preferred.height;
-        offscreen.setSize(PRINTER_WIDTH, height);
+        offscreen.setEditorKit(htmlKit);
+        offscreen.setDocument(editor.getDocument());
+        offscreen.setSize(PRINTER_WIDTH, 10000); // large enough height
 
-        // Force layout
-        offscreen.doLayout();
+        // Force layout of views
+        var ui = offscreen.getUI();
+        var rootView = ui.getRootView(offscreen);
+        rootView.setSize(PRINTER_WIDTH, 10000);
+        int height = (int) rootView.getPreferredSpan(javax.swing.text.View.Y_AXIS);
+        offscreen.setSize(PRINTER_WIDTH, height);
 
         BufferedImage img = new BufferedImage(PRINTER_WIDTH, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g2 = img.createGraphics();
@@ -336,45 +425,45 @@ public class TextPrintPanel extends JPanel {
 
     private void openFile() {
         var fc = new SystemFileChooser();
-        fc.setDialogTitle("Open RTF File");
-        fc.setFileFilter(new SystemFileChooser.FileNameExtensionFilter("RTF Files (*.rtf)", "rtf"));
+        fc.setDialogTitle("Open HTML File");
+        fc.setFileFilter(new SystemFileChooser.FileNameExtensionFilter("HTML Files (*.html)", "html"));
 
         if (fc.showOpenDialog(getParentFrame()) == SystemFileChooser.APPROVE_OPTION) {
-            loadRtfFile(fc.getSelectedFile());
+            loadHtmlFile(fc.getSelectedFile());
         }
     }
 
     private void saveFile() {
         var fc = new SystemFileChooser();
-        fc.setDialogTitle("Save RTF File");
-        fc.setFileFilter(new SystemFileChooser.FileNameExtensionFilter("RTF Files (*.rtf)", "rtf"));
-        fc.setSelectedFile(new File("document.rtf"));
+        fc.setDialogTitle("Save HTML File");
+        fc.setFileFilter(new SystemFileChooser.FileNameExtensionFilter("HTML Files (*.html)", "html"));
+        fc.setSelectedFile(new File("document.html"));
 
         if (fc.showSaveDialog(getParentFrame()) == SystemFileChooser.APPROVE_OPTION) {
             var file = fc.getSelectedFile();
-            if (!file.getName().toLowerCase().endsWith(".rtf")) {
-                file = new File(file.getAbsolutePath() + ".rtf");
+            if (!file.getName().toLowerCase().endsWith(".html")) {
+                file = new File(file.getAbsolutePath() + ".html");
             }
-            saveRtfToFile(file);
+            saveHtmlToFile(file);
         }
     }
 
-    private void loadRtfFile(File file) {
+    private void loadHtmlFile(File file) {
         try (var fis = new FileInputStream(file)) {
             editor.setText("");
-            rtfKit.read(fis, editor.getStyledDocument(), 0);
+            htmlKit.read(fis, editor.getDocument(), 0);
         } catch (Exception e) {
-            log.error("Error loading RTF file: {}", file, e);
+            log.error("Error loading HTML file: {}", file, e);
             JOptionPane.showMessageDialog(this, "Error loading file: " + e.getMessage(),
                     "Load Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
-    private void saveRtfToFile(File file) {
+    private void saveHtmlToFile(File file) {
         try (var fos = new FileOutputStream(file)) {
-            rtfKit.write(fos, editor.getStyledDocument(), 0, editor.getStyledDocument().getLength());
+            htmlKit.write(fos, editor.getDocument(), 0, editor.getDocument().getLength());
         } catch (Exception e) {
-            log.error("Error saving RTF file: {}", file, e);
+            log.error("Error saving HTML file: {}", file, e);
             JOptionPane.showMessageDialog(this, "Error saving file: " + e.getMessage(),
                     "Save Error", JOptionPane.ERROR_MESSAGE);
         }
@@ -385,7 +474,7 @@ public class TextPrintPanel extends JPanel {
     private void autoSave() {
         try {
             Files.createDirectories(SAVE_DIR);
-            saveRtfToFile(AUTO_SAVE_FILE.toFile());
+            saveHtmlToFile(AUTO_SAVE_FILE.toFile());
             log.debug("Auto-saved editor content");
         } catch (Exception e) {
             log.warn("Auto-save failed", e);
@@ -394,16 +483,38 @@ public class TextPrintPanel extends JPanel {
 
     private void loadAutoSaved() {
         if (Files.exists(AUTO_SAVE_FILE)) {
-            loadRtfFile(AUTO_SAVE_FILE.toFile());
+            loadHtmlFile(AUTO_SAVE_FILE.toFile());
             log.info("Restored editor content from auto-save");
         }
     }
 
-    /** Save content before shutdown. */
+    /**
+     * Save content before shutdown.
+     */
     public void saveBeforeShutdown() {
         autoSaveTimer.stop();
         previewTimer.stop();
         autoSave();
+    }
+
+    /**
+     * Custom renderer that displays the font name in its own font.
+     */
+    private static class FontListRenderer extends DefaultListCellRenderer {
+        private final Map<String, Font> fontCache = new HashMap<>();
+
+        @Override
+        public Component getListCellRendererComponent(JList<?> list, Object value,
+                                                      int index, boolean isSelected,
+                                                      boolean cellHasFocus) {
+            super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
+            if (value instanceof String fontName) {
+                Font font = fontCache.computeIfAbsent(fontName, name -> new Font(name, Font.PLAIN, 14));
+                setFont(font);
+                setText(fontName);
+            }
+            return this;
+        }
     }
 
     /**
