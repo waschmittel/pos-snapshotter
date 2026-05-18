@@ -43,7 +43,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import javax.imageio.ImageIO;
-import java.awt.FileDialog;
+import com.formdev.flatlaf.util.SystemFileChooser;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -376,14 +376,15 @@ public class SnapshotterFrame extends JFrame {
     }
 
     private void loadImageFromFile() {
-        var fd = new FileDialog(this, "Load Image", FileDialog.LOAD);
-        fd.setFilenameFilter((_, name) -> name.matches("(?i).*\\.(png|jpe?g|bmp|gif)$"));
-        fd.setDirectory(settingsStore.loadLastImageDirectory());
-        fd.setVisible(true);
-        if (fd.getFile() == null) return;
+        var fc = new SystemFileChooser();
+        fc.setDialogTitle("Load Image");
+        fc.setCurrentDirectory(new File(settingsStore.loadLastImageDirectory()));
+        fc.setFileFilter(new SystemFileChooser.FileNameExtensionFilter("Images (png, jpg, bmp, gif)", "png", "jpg", "jpeg", "bmp", "gif"));
 
-        settingsStore.saveLastImageDirectory(fd.getDirectory());
-        var file = new File(fd.getDirectory(), fd.getFile());
+        if (fc.showOpenDialog(this) != SystemFileChooser.APPROVE_OPTION) return;
+
+        var file = fc.getSelectedFile();
+        settingsStore.saveLastImageDirectory(file.getParent());
         try {
             BufferedImage raw = ImageIO.read(file);
             if (raw != null) {

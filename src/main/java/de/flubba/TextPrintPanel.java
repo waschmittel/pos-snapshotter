@@ -23,8 +23,8 @@ import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 import javax.swing.text.rtf.RTFEditorKit;
+import com.formdev.flatlaf.util.SystemFileChooser;
 import java.awt.BorderLayout;
-import java.awt.FileDialog;
 import java.awt.Frame;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -335,21 +335,23 @@ public class TextPrintPanel extends JPanel {
     }
 
     private void openFile() {
-        var fd = new FileDialog(getParentFrame(), "Open RTF File", FileDialog.LOAD);
-        fd.setFilenameFilter((_, name) -> name.toLowerCase().endsWith(".rtf"));
-        fd.setVisible(true);
-        if (fd.getFile() != null) {
-            loadRtfFile(new File(fd.getDirectory(), fd.getFile()));
+        var fc = new SystemFileChooser();
+        fc.setDialogTitle("Open RTF File");
+        fc.setFileFilter(new SystemFileChooser.FileNameExtensionFilter("RTF Files (*.rtf)", "rtf"));
+
+        if (fc.showOpenDialog(getParentFrame()) == SystemFileChooser.APPROVE_OPTION) {
+            loadRtfFile(fc.getSelectedFile());
         }
     }
 
     private void saveFile() {
-        var fd = new FileDialog(getParentFrame(), "Save RTF File", FileDialog.SAVE);
-        fd.setFilenameFilter((_, name) -> name.toLowerCase().endsWith(".rtf"));
-        fd.setFile("document.rtf");
-        fd.setVisible(true);
-        if (fd.getFile() != null) {
-            var file = new File(fd.getDirectory(), fd.getFile());
+        var fc = new SystemFileChooser();
+        fc.setDialogTitle("Save RTF File");
+        fc.setFileFilter(new SystemFileChooser.FileNameExtensionFilter("RTF Files (*.rtf)", "rtf"));
+        fc.setSelectedFile(new File("document.rtf"));
+
+        if (fc.showSaveDialog(getParentFrame()) == SystemFileChooser.APPROVE_OPTION) {
+            var file = fc.getSelectedFile();
             if (!file.getName().toLowerCase().endsWith(".rtf")) {
                 file = new File(file.getAbsolutePath() + ".rtf");
             }

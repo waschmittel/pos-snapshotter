@@ -15,6 +15,7 @@ import java.util.List;
 
 public class Main {
     static void main() {
+        System.setProperty("flatlaf.useSystemFileChooser", "true");
         FlatLightLaf.setup();
 
         javax.swing.SwingUtilities.invokeLater(() -> {
