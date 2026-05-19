@@ -2,6 +2,14 @@
 
 PosSnapshotter is a Java-based desktop application designed for capturing images (from a webcam or file) and printing them on ESC/POS thermal printers (specifically Epson multi-tone models). It features advanced dithering algorithms to produce high-quality grayscale-like output on 1-bit or multi-bit thermal heads.
 
+[![image](docs/result_thumb.jpg)](docs/result.jpg)
+
+[![image](docs/webcam_thumb.png)](docs/webcam.png)
+
+[![image](docs/image_thumb.png)](docs/image.png)
+
+[![image](docs/text_thumb.png)](docs/text.png)
+
 ## Features
 
 - **Webcam Capture**: Real-time preview and capture from connected webcams using OpenCV/JavaCV.
