@@ -63,6 +63,22 @@ class DitherPipelineTest {
     }
 
     @Test
+    void convertToGrayscale_transparent_returns1() {
+        var image = singlePixelImageWithAlpha(0, 0, 0, 0);
+        double[][] result = Dithering.convertToGrayscale(image);
+        // Fully transparent black should become white (1.0)
+        assertThat(result[0][0]).isCloseTo(1.0, within(0.001));
+    }
+
+    @Test
+    void convertToGrayscale_semiTransparentBlack_returns05() {
+        var image = singlePixelImageWithAlpha(0, 0, 0, 127);
+        double[][] result = Dithering.convertToGrayscale(image);
+        // 50% transparent black should become 50% gray
+        assertThat(result[0][0]).isCloseTo(0.5, within(0.01));
+    }
+
+    @Test
     void convertToGrayscale_1x1Image_returnsCorrectShape() {
         var image = singlePixelImage(128, 128, 128);
         double[][] result = Dithering.convertToGrayscale(image);
@@ -528,6 +544,12 @@ class DitherPipelineTest {
     private static BufferedImage singlePixelImage(int r, int g, int b) {
         BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB);
         image.setRGB(0, 0, new Color(r, g, b).getRGB());
+        return image;
+    }
+
+    private static BufferedImage singlePixelImageWithAlpha(int r, int g, int b, int a) {
+        BufferedImage image = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        image.setRGB(0, 0, new Color(r, g, b, a).getRGB());
         return image;
     }
 

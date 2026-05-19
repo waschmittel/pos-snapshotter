@@ -107,6 +107,7 @@ public class SnapshotterFrame extends JFrame {
         cameraPanel.setPreferredSize(new Dimension(grabber.getImageWidth(), grabber.getImageHeight()));
 
         previewPanel = new ImagePanel("Dithering preview...");
+        previewPanel.setBackground(Color.WHITE);
         previewPanel.setPreferredSize(new Dimension(grabber.getImageWidth(), grabber.getImageHeight()));
 
         captureButton = createActionButton("Take Photo", "icons/camera.svg");
@@ -151,8 +152,10 @@ public class SnapshotterFrame extends JFrame {
 
         // Image file panel
         sourceImagePanel = new ImagePanel("No image loaded");
+        sourceImagePanel.setBackground(Color.WHITE);
         sourceImagePanel.setPreferredSize(new Dimension(640, 427));
         imageDitheredPreview = new ImagePanel("Dithering preview...");
+        imageDitheredPreview.setBackground(Color.WHITE);
         imageDitheredPreview.setPreferredSize(new Dimension(640, 427));
         imageFilePanel = buildImageFilePanel();
 

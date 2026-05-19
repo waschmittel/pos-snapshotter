@@ -119,10 +119,18 @@ public class Dithering {
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int rgb = image.getRGB(x, y);
+                int a = (rgb >> 24) & 0xFF;
                 int r = (rgb >> 16) & 0xFF;
                 int g = (rgb >> 8) & 0xFF;
                 int b = rgb & 0xFF;
-                pixels[y][x] = (0.6 * r + 0.2 * g + 0.2 * b) / 255.0;
+
+                double alpha = a / 255.0;
+                // Blend with white background: color * alpha + white * (1 - alpha)
+                double red = r * alpha + 255.0 * (1.0 - alpha);
+                double green = g * alpha + 255.0 * (1.0 - alpha);
+                double blue = b * alpha + 255.0 * (1.0 - alpha);
+
+                pixels[y][x] = (0.6 * red + 0.2 * green + 0.2 * blue) / 255.0;
             }
         }
         return pixels;

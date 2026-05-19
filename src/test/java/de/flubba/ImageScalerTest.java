@@ -45,8 +45,8 @@ class ImageScalerTest {
         BufferedImage result = ImageScaler.scaleToFit(source, 200, 200);
         assertThat(result.getWidth()).isEqualTo(200);
         assertThat(result.getHeight()).isEqualTo(200);
-        // Top-left corner should be black (letterbox)
-        assertThat(getGray(result, 0, 0)).isEqualTo(0);
+        // Top-left corner should be white (new default background)
+        assertThat(getGray(result, 0, 0)).isEqualTo(255);
         // Center should not be black (contains the image)
         assertThat(getGray(result, 100, 100)).isEqualTo(255);
     }
@@ -58,8 +58,8 @@ class ImageScalerTest {
         BufferedImage result = ImageScaler.scaleToFit(source, 200, 200);
         assertThat(result.getWidth()).isEqualTo(200);
         assertThat(result.getHeight()).isEqualTo(200);
-        // Left edge should be black (letterbox)
-        assertThat(getGray(result, 0, 100)).isEqualTo(0);
+        // Left edge should be white (new default background)
+        assertThat(getGray(result, 0, 100)).isEqualTo(255);
         // Center should be white
         assertThat(getGray(result, 100, 100)).isEqualTo(255);
     }
@@ -75,13 +75,13 @@ class ImageScalerTest {
     }
 
     @Test
-    void scaleToFit_letterboxCornerPixels_areBlack() {
+    void scaleToFit_letterboxCornerPixels_areWhite() {
         BufferedImage source = new BufferedImage(200, 100, BufferedImage.TYPE_INT_RGB);
         fillWhite(source);
         BufferedImage result = ImageScaler.scaleToFit(source, 200, 200);
-        // Top-left and bottom-left corners should be black letterbox
-        assertThat(getGray(result, 0, 0)).isEqualTo(0);
-        assertThat(getGray(result, 0, 199)).isEqualTo(0);
+        // Top-left and bottom-left corners should be white background
+        assertThat(getGray(result, 0, 0)).isEqualTo(255);
+        assertThat(getGray(result, 0, 199)).isEqualTo(255);
     }
 
     @Test
