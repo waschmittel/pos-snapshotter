@@ -77,6 +77,7 @@ public class SnapshotterFrame extends JFrame {
     private JTabbedPane tabbedPane;
 
     // parameter controls
+    private JComboBox<String> printerCombo;
     private JComboBox<DiffusionMatrix> matrixCombo;
     private JSpinner preDitheringGammaSpinner;
     private JSlider preDitheringGammaSlider;
@@ -156,7 +157,7 @@ public class SnapshotterFrame extends JFrame {
         imageFilePanel = buildImageFilePanel();
 
         // Text print panel
-        textPrintPanel = new TextPrintPanel(currentParams);
+        textPrintPanel = new TextPrintPanel(currentParams, this::getSelectedPrinter);
 
         // Tabbed pane for mode switching
         tabbedPane = new JTabbedPane();
@@ -223,14 +224,26 @@ public class SnapshotterFrame extends JFrame {
 
         // --- General ---
         JPanel generalPanel = createGroupPanel("General");
+
+        String[] printers = PrinterService.getAvailablePrinters();
+        printerCombo = new JComboBox<>(printers);
+        String savedPrinter = settingsStore.loadPrinterName();
+        if (savedPrinter != null) {
+            printerCombo.setSelectedItem(savedPrinter);
+        } else {
+            printerCombo.setSelectedItem(PrinterService.findDefaultPrinter());
+        }
+        printerCombo.addActionListener(_ -> settingsStore.savePrinterName((String) printerCombo.getSelectedItem()));
+        addSettingRow(generalPanel, "Printer:", printerCombo, 0);
+
         matrixCombo = new JComboBox<>(DiffusionMatrix.values());
         matrixCombo.setSelectedItem(saved.diffusionMatrix());
         matrixCombo.addActionListener(_ -> syncParams());
-        addSettingRow(generalPanel, "Diffusion:", matrixCombo, 0);
+        addSettingRow(generalPanel, "Diffusion:", matrixCombo, 1);
 
         grayLevelsSpinner = new JSpinner(new SpinnerNumberModel(saved.grayLevels(), 2, 12, 1));
         grayLevelsSpinner.addChangeListener(_ -> syncParams());
-        addSettingRow(generalPanel, "Gray levels:", grayLevelsSpinner, 1);
+        addSettingRow(generalPanel, "Gray levels:", grayLevelsSpinner, 2);
 
         root.add(generalPanel, gbc);
         gbc.gridy++;
@@ -399,6 +412,10 @@ public class SnapshotterFrame extends JFrame {
 
     private static final int PRINTER_WIDTH = 512;
 
+    private String getSelectedPrinter() {
+        return (String) printerCombo.getSelectedItem();
+    }
+
     private void printFileImage() {
         BufferedImage original = loadedOriginalImage.get();
         if (original == null) return;
@@ -415,7 +432,7 @@ public class SnapshotterFrame extends JFrame {
             var chunks = landscape
                     ? Dithering.toDitheredChunks(scaled, currentParams.get())
                     : Dithering.toDitheredChunksPortrait(scaled, currentParams.get());
-            Main.printIt(chunks);
+            PrinterService.print(getSelectedPrinter(), chunks);
             log.info("Printed image from file: {}x{} → {}x{} ({})",
                     original.getWidth(), original.getHeight(),
                     scaled.getWidth(), scaled.getHeight(),
@@ -632,7 +649,7 @@ public class SnapshotterFrame extends JFrame {
                 // Camera images are usually landscape, so we scale height to printer width
                 // and then transpose (landscape=true).
                 BufferedImage scaled = ImageScaler.scaleToHeight(snapshot, PRINTER_WIDTH);
-                Main.printIt(Dithering.toDitheredChunks(scaled, currentParams.get()));
+                PrinterService.print(getSelectedPrinter(), Dithering.toDitheredChunks(scaled, currentParams.get()));
             } catch (IOException e) {
                 log.error("Failed to print photo", e);
             }

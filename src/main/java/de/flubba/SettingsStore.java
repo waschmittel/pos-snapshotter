@@ -69,4 +69,16 @@ public class SettingsStore {
     public void saveLastTab(int index) {
         prefs.putInt("lastTab", index);
     }
+
+    public String loadPrinterName() {
+        return prefs.get("printerName", null);
+    }
+
+    public void savePrinterName(String name) {
+        if (name == null) {
+            prefs.remove("printerName");
+        } else {
+            prefs.put("printerName", name);
+        }
+    }
 }

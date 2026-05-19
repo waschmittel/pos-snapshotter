@@ -1,6 +1,8 @@
 package de.flubba;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -10,6 +12,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 class DitherPipelineTest {
+
+    // --- applyErrorDiffusion ---
+
+    @ParameterizedTest
+    @EnumSource(DiffusionMatrix.class)
+    void applyErrorDiffusion_allMatrices_noCrash(DiffusionMatrix matrix) {
+        double[][] pixels = {{0.1, 0.9}, {0.8, 0.2}};
+        double[] levels = {0.0, 1.0};
+        var params = new DitherParams(matrix, 1.0, 0.0, 1.0, 2, 1, 1.0);
+        var result = Dithering.applyErrorDiffusion(pixels, params, levels, null);
+        assertThat(result.ditheredPixels()).hasDimensions(2, 2);
+    }
 
     // --- convertToGrayscale ---
 

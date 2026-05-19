@@ -55,6 +55,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 @Slf4j
 public class TextPrintPanel extends JPanel {
@@ -75,11 +76,13 @@ public class TextPrintPanel extends JPanel {
     private final JSpinner fontSizeSpinner;
     private final JComboBox<String> fontFamilyCombo;
     private final AtomicReference<DitherParams> currentParams;
+    private final Supplier<String> printerSupplier;
 
     private boolean updatingToolbar = false;
 
-    public TextPrintPanel(AtomicReference<DitherParams> currentParams) {
+    public TextPrintPanel(AtomicReference<DitherParams> currentParams, Supplier<String> printerSupplier) {
         this.currentParams = currentParams;
+        this.printerSupplier = printerSupplier;
         setLayout(new BorderLayout());
 
         editor = new JTextPane();
@@ -382,7 +385,7 @@ public class TextPrintPanel extends JPanel {
             BufferedImage image = renderEditorToImage();
             if (image == null) return;
             var chunks = Dithering.toDitheredChunksPortrait(image, currentParams.get());
-            Main.printIt(chunks);
+            PrinterService.print(printerSupplier.get(), chunks);
         } catch (IOException e) {
             log.error("Error printing text", e);
             JOptionPane.showMessageDialog(this, "Print error: " + e.getMessage(),
