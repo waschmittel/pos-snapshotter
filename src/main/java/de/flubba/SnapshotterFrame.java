@@ -39,9 +39,15 @@ import java.awt.Toolkit;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.dnd.DnDConstants;
+import java.awt.dnd.DropTarget;
+import java.awt.dnd.DropTargetAdapter;
+import java.awt.dnd.DropTargetDropEvent;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.List;
 import javax.imageio.ImageIO;
 import com.formdev.flatlaf.util.SystemFileChooser;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -186,6 +192,7 @@ public class SnapshotterFrame extends JFrame {
 
         setLayout(new BorderLayout());
         add(tabbedPane, BorderLayout.CENTER);
+        setupDragAndDrop();
         smartPack();
         setLocationRelativeTo(null);
 
@@ -399,18 +406,46 @@ public class SnapshotterFrame extends JFrame {
 
         if (fc.showOpenDialog(this) != SystemFileChooser.APPROVE_OPTION) return;
 
-        var file = fc.getSelectedFile();
+        processImageFile(fc.getSelectedFile());
+    }
+
+    private void processImageFile(File file) {
         settingsStore.saveLastImageDirectory(file.getParent());
         try {
             BufferedImage raw = ImageIO.read(file);
             if (raw != null) {
                 loadedOriginalImage.set(raw);
                 sourceImagePanel.updateImage(raw);
+                tabbedPane.setSelectedIndex(1); // Switch to "Image" tab
                 log.info("Loaded image from file: {} ({}x{})", file.getName(), raw.getWidth(), raw.getHeight());
             }
         } catch (IOException e) {
             log.error("Failed to load image", e);
         }
+    }
+
+    private void setupDragAndDrop() {
+        setDropTarget(new DropTarget(this, DnDConstants.ACTION_COPY, new DropTargetAdapter() {
+            @Override
+            public void drop(DropTargetDropEvent dtde) {
+                try {
+                    if (dtde.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                        dtde.acceptDrop(DnDConstants.ACTION_COPY);
+                        @SuppressWarnings("unchecked")
+                        List<File> files = (List<File>) dtde.getTransferable().getTransferData(DataFlavor.javaFileListFlavor);
+                        if (files != null && !files.isEmpty()) {
+                            processImageFile(files.get(0));
+                        }
+                        dtde.dropComplete(true);
+                    } else {
+                        dtde.rejectDrop();
+                    }
+                } catch (Exception e) {
+                    log.error("Drag and drop failed", e);
+                    dtde.dropComplete(false);
+                }
+            }
+        }));
     }
 
     private static final int PRINTER_WIDTH = 512;

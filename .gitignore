@@ -38,3 +38,5 @@ build/
 ### Mac OS ###
 .DS_Store
 /*.png
+
+dependency-reduced-pom.xml
