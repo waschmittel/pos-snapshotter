@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>POS Snapshotter - Web</title>
+    <link rel="stylesheet" href="editor.css">
+    <link rel="stylesheet" href="menu.css">
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; background: #f0f0f0; }
+        #editor-container { width: 512px; background: white; border: 1px solid #ccc; min-height: 300px; padding: 0; margin-bottom: 20px; position: relative; }
+        #editor { min-height: 280px; outline: none; padding: 10px; }
+        #preview-container { width: 512px; background: white; border: 1px solid #ccc; min-height: 100px; }
+        #preview { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+        .main-toolbar { margin-bottom: 10px; display: flex; gap: 10px; width: 512px; align-items: center; }
+        .print-btn { background: #0078d7; color: white; border: none; font-weight: bold; padding: 8px 16px; cursor: pointer; margin-left: auto; }
+        .print-btn:hover { background: #005a9e; }
+        .ProseMirror ul, .ProseMirror ol { padding-left: 30px; }
+        .ProseMirror blockquote { border-left: 3px solid #eee; padding-left: 10px; color: #666; }
+        h1 { color: #333; }
+        h2 { color: #555; align-self: flex-start; width: 512px; margin-left: auto; margin-right: auto; }
+        
+        .ProseMirror-menubar { border-bottom: 1px solid #ccc; background: #f8f8f8; padding: 2px 4px; display: flex; flex-wrap: wrap; }
+        .ProseMirror-menuitem { margin-right: 4px; display: inline-block; vertical-align: middle; }
+    </style>
+</head>
+<body>
+    <h1>POS Web Editor</h1>
+    <div class="main-toolbar">
+        <button onclick="doPrint()" class="print-btn">Print</button>
+    </div>
+    <div id="editor-container">
+        <div id="editor"></div>
+    </div>
+    <h2>Preview</h2>
+    <div id="preview-container">
+        <img id="preview" alt="Preview will appear here">
+    </div>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "prosemirror-model": "./lib/prosemirror-model.js",
+        "prosemirror-state": "./lib/prosemirror-state.js",
+        "prosemirror-view": "./lib/prosemirror-view.js",
+        "prosemirror-keymap": "./lib/prosemirror-keymap.js",
+        "prosemirror-commands": "./lib/prosemirror-commands.js",
+        "prosemirror-history": "./lib/prosemirror-history.js",
+        "prosemirror-schema-basic": "./lib/prosemirror-schema-basic.js",
+        "prosemirror-schema-list": "./lib/prosemirror-schema-list.js",
+        "prosemirror-example-setup": "./lib/prosemirror-example-setup.js",
+        "prosemirror-menu": "./lib/prosemirror-menu.js",
+        "prosemirror-inputrules": "./lib/prosemirror-inputrules.js",
+        "prosemirror-transform": "./lib/prosemirror-transform.js",
+        "prosemirror-dropcursor": "./lib/prosemirror-dropcursor.js",
+        "prosemirror-gapcursor": "./lib/prosemirror-gapcursor.js",
+        "orderedmap": "./lib/orderedmap.js",
+        "crelt": "./lib/crelt.js",
+        "rope-sequence": "./lib/rope-sequence.js",
+        "w3c-keyname": "./lib/w3c-keyname.js"
+      }
+    }
+    </script>
+    <script type="module">
+        import {EditorState} from "prosemirror-state"
+        import {EditorView} from "prosemirror-view"
+        import {Schema, DOMParser, DOMSerializer} from "prosemirror-model"
+        import {schema} from "prosemirror-schema-basic"
+        import {addListNodes, liftListItem, sinkListItem} from "prosemirror-schema-list"
+        import {exampleSetup, buildMenuItems} from "prosemirror-example-setup"
+        import {toggleMark} from "prosemirror-commands"
+        import {keymap} from "prosemirror-keymap"
+        import {MenuItem, Dropdown} from "prosemirror-menu"
+
+        let mySchema;
+
+        async function init() {
+            const fontResponse = await fetch("/fonts")
+            const systemFonts = await fontResponse.json()
+
+            const nodes = addListNodes(schema.spec.nodes, "paragraph block*", "block")
+            delete nodes.image
+
+            const marks = schema.spec.marks
+                .append({
+                    fontFamily: {
+                        attrs: {family: {}},
+                        parseDOM: [{style: "font-family", getAttrs: value => ({family: value})}],
+                        toDOM(mark) { return ["span", {style: `font-family: ${mark.attrs.family}`}, 0] }
+                    },
+                    fontSize: {
+                        attrs: {size: {}},
+                        parseDOM: [{style: "font-size", getAttrs: value => ({size: value})}],
+                        toDOM(mark) { return ["span", {style: `font-size: ${mark.attrs.size}`}, 0] }
+                    }
+                })
+                .remove("link")
+
+            mySchema = new Schema({ nodes, marks })
+
+            const fontItems = systemFonts.slice(0, 50).map(f => new MenuItem({
+                label: f,
+                title: "Set font to " + f,
+                run(state, dispatch) { toggleMark(mySchema.marks.fontFamily, {family: f})(state, dispatch) }
+            }))
+
+            const sizeItems = ["12px", "16px", "20px", "24px", "32px", "48px"].map(s => new MenuItem({
+                label: s.replace("px", ""),
+                title: "Set font size to " + s,
+                run(state, dispatch) { toggleMark(mySchema.marks.fontSize, {size: s})(state, dispatch) }
+            }))
+
+            const menu = buildMenuItems(mySchema)
+            const menuContent = menu.fullMenu
+            
+            // Append custom dropdowns to the menu
+            menuContent.push([
+                new Dropdown(fontItems, {label: "Font"}),
+                new Dropdown(sizeItems, {label: "Size"})
+            ])
+
+            window.view = new EditorView(document.querySelector("#editor"), {
+              state: EditorState.create({
+                doc: DOMParser.fromSchema(mySchema).parse(document.createElement("div")),
+                plugins: [
+                    ...exampleSetup({schema: mySchema, menuContent}),
+                    keymap({
+                        "Tab": sinkListItem(mySchema.nodes.list_item),
+                        "Shift-Tab": liftListItem(mySchema.nodes.list_item),
+                    })
+                ]
+              }),
+              dispatchTransaction(tr) {
+                  let newState = view.state.apply(tr)
+                  view.updateState(newState)
+                  if (tr.docChanged) {
+                      debouncedUpdatePreview()
+                  }
+              }
+            })
+
+            updatePreview()
+        }
+
+        function getHTML() {
+            if (!mySchema) return ""
+            const div = document.createElement("div")
+            div.appendChild(DOMSerializer.fromSchema(mySchema).serializeFragment(view.state.doc.content))
+            return div.innerHTML
+        }
+
+        window.updatePreview = async () => {
+            const html = getHTML()
+            if (!html) return
+            const response = await fetch("/preview", {
+                method: "POST",
+                body: html
+            })
+            if (response.ok) {
+                const blob = await response.blob()
+                if (window.previewUrl) URL.revokeObjectURL(window.previewUrl)
+                window.previewUrl = URL.createObjectURL(blob)
+                document.querySelector("#preview").src = window.previewUrl
+            }
+        }
+
+        window.doPrint = async () => {
+            const html = getHTML()
+            const response = await fetch("/print", {
+                method: "POST",
+                body: html
+            })
+            if (response.ok) {
+                alert("Printed successfully!")
+            } else {
+                const err = await response.text()
+                alert("Print failed: " + err)
+            }
+        }
+
+        let timeout
+        function debouncedUpdatePreview() {
+            clearTimeout(timeout)
+            timeout = setTimeout(updatePreview, 1000)
+        }
+        
+        init()
+    </script>
+</body>
+</html>

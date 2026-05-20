@@ -21,6 +21,7 @@ PosSnapshotter is a Java-based desktop application designed for capturing images
   - **CLAHE** (Contrast Limited Adaptive Histogram Equalization) for enhanced detail in various lighting conditions.
 - **Multi-tone Printing**: Specifically tuned for Epson printers that support multiple thermal head levels (via `GS ( L` commands).
 - **Modern UI**: Built with Swing and FlatLaf for a clean, cross-platform look.
+- **REST API & Web Editor**: A built-in web server providing a rich text editor (ProseMirror) and remote printing capabilities.
 
 ## Requirements
 
@@ -33,9 +34,28 @@ PosSnapshotter is a Java-based desktop application designed for capturing images
 This project uses Maven. To build and run:
 
 ```bash
-mvn clean compile
-mvn exec:java -Dexec.mainClass="de.flubba.Main"
+mvn clean package
+java -jar target/possnapshotter.jar [FLAGS]
 ```
+
+### CLI Flags
+
+The following flags are available to control the application behavior:
+
+- `--server`: Enables the REST API and Web Editor on port `8080`. Disabled by default.
+- `--headless`: Runs the application without the Swing GUI. Useful for server-only deployments. Disabled by default.
+
+## Web Editor & API
+
+When started with the `--server` flag, the application hosts a web interface at `http://localhost:8080`.
+
+### Endpoints
+
+- `GET /`: Serves the ProseMirror-based rich text editor.
+- `GET /fonts`: Returns a JSON list of available system font families.
+- `POST /preview`: Accepts HTML in the request body and returns a dithered PNG preview of the rendered content.
+- `POST /print`: Accepts HTML in the request body, renders it, and sends it to the default printer.
+- `/static/*`: Serves static assets for the web frontend.
 
 ## Configuration
 
