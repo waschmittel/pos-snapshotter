@@ -4,6 +4,7 @@ import java.util.prefs.Preferences;
 
 public class SettingsStore {
     private final Preferences prefs;
+    private volatile DitherParams current;
 
     public SettingsStore() {
         this(Preferences.userNodeForPackage(DitherParams.class));
@@ -11,6 +12,17 @@ public class SettingsStore {
 
     SettingsStore(Preferences prefs) {
         this.prefs = prefs;
+        this.current = loadDitherParams();
+    }
+
+    public DitherParams currentDitherParams() {
+        return current;
+    }
+
+    public void updateDitherParams(DitherParams params) {
+        DitherParams clamped = params.clamped();
+        current = clamped;
+        saveDitherParams(clamped);
     }
 
     public DitherParams loadDitherParams() {
@@ -34,6 +46,7 @@ public class SettingsStore {
         prefs.putInt("grayLevels", params.grayLevels());
         prefs.putInt("claheTilesX", params.claheTilesX());
         prefs.putDouble("claheClipLimit", params.claheClipLimit());
+        current = params;
     }
 
     public void resetDitherParams() {
@@ -44,6 +57,7 @@ public class SettingsStore {
         prefs.remove("grayLevels");
         prefs.remove("claheTilesX");
         prefs.remove("claheClipLimit");
+        current = DitherParams.defaults();
     }
 
     public int loadCameraIndex() {
@@ -80,5 +94,13 @@ public class SettingsStore {
         } else {
             prefs.put("printerName", name);
         }
+    }
+
+    public boolean loadSidebarExpanded() {
+        return prefs.getBoolean("sidebarExpanded", true);
+    }
+
+    public void saveSidebarExpanded(boolean expanded) {
+        prefs.putBoolean("sidebarExpanded", expanded);
     }
 }

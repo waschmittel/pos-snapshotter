@@ -61,7 +61,11 @@ public class DitheredEpsonGrayscaleImageWrapper implements EscPosConst, ImageWra
             //
             int paramSize = image.getRasterSizeInBytes() + 10;
 
-            var colors = new int[]{49, 50, 51, 52};
+            // ESC/POS color codes 49..52 — one per dither layer
+            var colors = new int[DitherPipeline.PRINTER_LAYERS];
+            for (int i = 0; i < DitherPipeline.PRINTER_LAYERS; i++) {
+                colors[i] = 49 + i;
+            }
 
             for (int bitMapLayer = 0; bitMapLayer < colors.length; bitMapLayer++) {
 

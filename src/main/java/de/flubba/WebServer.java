@@ -20,9 +20,11 @@ import java.util.concurrent.Executors;
 public class WebServer {
     private final HttpServer server;
     private final SettingsStore settingsStore;
+    private final PrintWorkflow printWorkflow;
 
     public WebServer(int port, SettingsStore settingsStore) throws IOException {
         this.settingsStore = settingsStore;
+        this.printWorkflow = new PrintWorkflow(settingsStore, settingsStore::loadPrinterName);
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.server.createContext("/", new StaticHandler());
         this.server.createContext("/print", new PrintHandler());
@@ -102,12 +104,10 @@ public class WebServer {
 
             String html = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             try {
-                BufferedImage img = HtmlRenderer.render(html);
+                BufferedImage img = HtmlToImageRenderer.render(html, HtmlToImageRenderer.PRINTER_WIDTH);
                 if (img != null) {
-                    var params = settingsStore.loadDitherParams();
-                    var chunks = Dithering.toDitheredChunksPortrait(img, params);
-                    PrinterService.print(settingsStore.loadPrinterName(), chunks);
-                    
+                    printWorkflow.print(img, Orientation.PORTRAIT);
+
                     String response = "OK";
                     exchange.sendResponseHeaders(200, response.length());
                     try (OutputStream os = exchange.getResponseBody()) {
@@ -137,10 +137,10 @@ public class WebServer {
 
             String html = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             try {
-                BufferedImage img = HtmlRenderer.render(html);
+                BufferedImage img = HtmlToImageRenderer.render(html, HtmlToImageRenderer.PRINTER_WIDTH);
                 if (img != null) {
                     var params = settingsStore.loadDitherParams();
-                    BufferedImage dithered = Dithering.toDitheredImage(img, params);
+                    BufferedImage dithered = DitherPipeline.preview(img, params);
                     
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
                     ImageIO.write(dithered, "png", baos);
