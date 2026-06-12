@@ -2,10 +2,6 @@ package de.flubba;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import lombok.extern.slf4j.Slf4j;
-import org.bytedeco.javacv.Frame;
-import org.bytedeco.javacv.FrameGrabber;
-import org.bytedeco.javacv.Java2DFrameConverter;
-import org.bytedeco.javacv.OpenCVFrameGrabber;
 
 import javax.swing.AbstractAction;
 import javax.swing.JButton;
@@ -26,7 +22,6 @@ import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
@@ -44,10 +39,8 @@ public class CameraTabPanel extends JPanel {
     private final JPanel panelsContainer;
     private final JToggleButton settingsButton;
 
-    private final AtomicBoolean running;
     private final AtomicBoolean active = new AtomicBoolean(true);
-    private final Java2DFrameConverter converter = new Java2DFrameConverter();
-    private FrameGrabber grabber;
+    private final Camera camera;
     private boolean settingsExpanded;
 
     public CameraTabPanel(SettingsStore settings,
@@ -55,25 +48,25 @@ public class CameraTabPanel extends JPanel {
                           JScrollPane paramsScrollPane,
                           AtomicBoolean running,
                           Runnable repack,
-                          StatusBar statusBar) throws FrameGrabber.Exception {
+                          StatusBar statusBar) {
         super(new BorderLayout());
         this.settings = settings;
         this.printWorkflow = printWorkflow;
         this.paramsScrollPane = paramsScrollPane;
-        this.running = running;
         this.repack = repack;
         this.statusBar = statusBar;
         this.settingsExpanded = settings.loadSidebarExpanded();
 
-        int savedCamera = settings.loadCameraIndex();
-        grabber = startGrabber(savedCamera);
-
         cameraPanel = new CameraPanel();
-        cameraPanel.setPreferredSize(new Dimension(grabber.getImageWidth(), grabber.getImageHeight()));
+        camera = new Camera(settings.loadCameraIndex(), running, active::get,
+                cameraPanel::updateImage, statusBar::error);
+
+        Dimension frameSize = camera.frameSize();
+        cameraPanel.setPreferredSize(frameSize);
 
         previewPanel = new ImagePanel("Dithering preview...");
         previewPanel.setBackground(Color.WHITE);
-        previewPanel.setPreferredSize(new Dimension(grabber.getImageWidth(), grabber.getImageHeight()));
+        previewPanel.setPreferredSize(frameSize);
         previewPanel.setVisible(settingsExpanded);
 
         captureButton = SnapshotterFrame.createActionButton("Take Photo", "icons/camera.svg");
@@ -90,11 +83,14 @@ public class CameraTabPanel extends JPanel {
             updateLayout();
         });
 
-        String[] cameraLabels = detectCameraNames();
+        String[] cameraLabels = Camera.detectCameraNames();
         JComboBox<String> cameraCombo = new JComboBox<>(cameraLabels);
-        cameraCombo.setSelectedIndex(Math.min(savedCamera, cameraLabels.length - 1));
+        cameraCombo.setSelectedIndex(Math.min(settings.loadCameraIndex(), cameraLabels.length - 1));
         cameraCombo.setToolTipText("Select camera device");
-        cameraCombo.addActionListener(_ -> switchCamera(cameraCombo.getSelectedIndex()));
+        cameraCombo.addActionListener(_ -> {
+            camera.select(cameraCombo.getSelectedIndex());
+            settings.saveCameraIndex(cameraCombo.getSelectedIndex());
+        });
 
         JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
         rightPanel.add(cameraCombo);
@@ -112,8 +108,8 @@ public class CameraTabPanel extends JPanel {
         add(bottomPanel, BorderLayout.SOUTH);
 
         installShortcuts();
-        startCameraLoop();
-        startDitheringLoop();
+        LivePreview.continuous("dithering-loop", running, active::get,
+                cameraPanel::getCurrentImage, settings, previewPanel::updateImage);
     }
 
     public void attachSidebar() {
@@ -131,18 +127,7 @@ public class CameraTabPanel extends JPanel {
     }
 
     public void shutdown() {
-        try {
-            if (grabber != null) {
-                grabber.stop();
-                grabber.release();
-            }
-        } catch (FrameGrabber.Exception e) {
-            log.error("Error stopping webcam", e);
-        }
-    }
-
-    public Dimension grabberSize() {
-        return new Dimension(grabber.getImageWidth(), grabber.getImageHeight());
+        camera.close();
     }
 
     private void installShortcuts() {
@@ -170,59 +155,6 @@ public class CameraTabPanel extends JPanel {
         repack.run();
     }
 
-    private FrameGrabber startGrabber(int deviceIndex) {
-        try {
-            var g = new OpenCVFrameGrabber(deviceIndex);
-            g.setImageWidth(768);
-            g.setImageHeight(512);
-            g.start();
-            log.info("Camera {} started: {}x{}", deviceIndex, g.getImageWidth(), g.getImageHeight());
-            return g;
-        } catch (FrameGrabber.Exception e) {
-            log.error("Failed to start camera {}", deviceIndex, e);
-            if (statusBar != null) statusBar.error("Failed to start camera " + deviceIndex + ": " + e.getMessage());
-            return null;
-        }
-    }
-
-    private void switchCamera(int deviceIndex) {
-        Thread.ofPlatform().name("camera-switch").start(() -> {
-            try {
-                if (grabber != null) {
-                    grabber.stop();
-                    grabber.release();
-                }
-            } catch (FrameGrabber.Exception e) {
-                log.error("Error stopping old camera", e);
-            }
-            grabber = startGrabber(deviceIndex);
-            settings.saveCameraIndex(deviceIndex);
-        });
-    }
-
-    private void startCameraLoop() {
-        PollingLoop.start("camera-loop", running, active::get, () -> {
-            var currentGrabber = grabber;
-            if (currentGrabber == null) return;
-            Frame frame = currentGrabber.grab();
-            if (frame != null) {
-                BufferedImage image = converter.convert(frame);
-                if (image != null) {
-                    cameraPanel.updateImage(image);
-                }
-            }
-        });
-    }
-
-    private void startDitheringLoop() {
-        PollingLoop.start("dithering-loop", running, active::get, () -> {
-            BufferedImage image = cameraPanel.getCurrentImage();
-            if (image != null) {
-                previewPanel.updateImage(DitherPipeline.preview(image, settings.currentDitherParams()));
-            }
-        });
-    }
-
     private void startCapture() {
         captureButton.setEnabled(false);
         statusBar.info("Capturing in 3...");
@@ -246,35 +178,5 @@ public class CameraTabPanel extends JPanel {
             cameraPanel.flash();
         }
         captureButton.setEnabled(true);
-    }
-
-    private static String[] detectCameraNames() {
-        try {
-            var process = new ProcessBuilder("system_profiler", "SPCameraDataType", "-json")
-                    .redirectErrorStream(true).start();
-            var output = new String(process.getInputStream().readAllBytes());
-            process.waitFor();
-
-            var names = new ArrayList<String>();
-            int searchFrom = 0;
-            while (true) {
-                int nameKeyPos = output.indexOf("\"_name\"", searchFrom);
-                if (nameKeyPos < 0) break;
-                int colonPos = output.indexOf(":", nameKeyPos);
-                int quoteStart = output.indexOf("\"", colonPos + 1);
-                int quoteEnd = output.indexOf("\"", quoteStart + 1);
-                if (quoteStart >= 0 && quoteEnd > quoteStart) {
-                    names.add(output.substring(quoteStart + 1, quoteEnd));
-                }
-                searchFrom = quoteEnd + 1;
-            }
-
-            if (!names.isEmpty()) {
-                return names.toArray(String[]::new);
-            }
-        } catch (Exception e) {
-            log.warn("Could not detect camera names", e);
-        }
-        return new String[]{"Camera 0", "Camera 1", "Camera 2", "Camera 3"};
     }
 }

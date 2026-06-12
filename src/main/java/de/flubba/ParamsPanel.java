@@ -36,7 +36,7 @@ public class ParamsPanel extends JPanel {
     private final JSpinner claheClipLimitSpinner;
     private final JSlider claheClipLimitSlider;
 
-    public ParamsPanel(SettingsStore settings) {
+    public ParamsPanel(SettingsStore settings, Printer printer) {
         super(new GridBagLayout());
         this.settings = settings;
 
@@ -51,16 +51,17 @@ public class ParamsPanel extends JPanel {
 
         JPanel generalPanel = createGroupPanel("General");
 
-        String[] printers = PrinterService.getAvailablePrinters();
+        String[] printers = printer.availablePrinters();
         printerCombo = new JComboBox<>(printers);
-        String savedPrinter = settings.loadPrinterName();
+        String savedPrinter = settings.currentPrinterName();
         if (savedPrinter != null) {
             printerCombo.setSelectedItem(savedPrinter);
         } else {
-            printerCombo.setSelectedItem(PrinterService.findDefaultPrinter());
+            printerCombo.setSelectedItem(printer.findDefaultPrinter());
         }
+        settings.updatePrinterName((String) printerCombo.getSelectedItem());
         printerCombo.setToolTipText("Target ESC/POS printer");
-        printerCombo.addActionListener(_ -> settings.savePrinterName((String) printerCombo.getSelectedItem()));
+        printerCombo.addActionListener(_ -> settings.updatePrinterName((String) printerCombo.getSelectedItem()));
         addSettingRow(generalPanel, "Printer:", printerCombo, 0);
 
         matrixCombo = new JComboBox<>(DiffusionMatrix.values());
@@ -146,10 +147,6 @@ public class ParamsPanel extends JPanel {
         add(new JPanel(), gbc);
 
         setPreferredSize(new Dimension(300, 600));
-    }
-
-    public String getSelectedPrinter() {
-        return (String) printerCombo.getSelectedItem();
     }
 
     private JPanel createGroupPanel(String title) {

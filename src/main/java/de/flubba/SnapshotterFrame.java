@@ -2,7 +2,6 @@ package de.flubba;
 
 import com.formdev.flatlaf.extras.FlatSVGIcon;
 import lombok.extern.slf4j.Slf4j;
-import org.bytedeco.javacv.FrameGrabber;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -31,9 +30,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @Slf4j
 public class SnapshotterFrame extends JFrame {
 
-    private final SettingsStore settings = new SettingsStore();
-    private final ParamsPanel paramsPanel = new ParamsPanel(settings);
-    private final PrintWorkflow printWorkflow = new PrintWorkflow(settings, paramsPanel::getSelectedPrinter);
+    private final SettingsStore settings;
+    private final ParamsPanel paramsPanel;
+    private final PrintWorkflow printWorkflow;
     private final StatusBar statusBar = new StatusBar();
 
     private final AtomicBoolean running = new AtomicBoolean(true);
@@ -42,8 +41,11 @@ public class SnapshotterFrame extends JFrame {
     private final TextPrintPanel textTab;
     private final JTabbedPane tabbedPane;
 
-    public SnapshotterFrame() throws FrameGrabber.Exception {
+    public SnapshotterFrame(SettingsStore settings, Printer printer) {
         super("POS Snapshotter");
+        this.settings = settings;
+        this.paramsPanel = new ParamsPanel(settings, printer);
+        this.printWorkflow = new PrintWorkflow(settings, printer);
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override
@@ -63,7 +65,7 @@ public class SnapshotterFrame extends JFrame {
         cameraTab = new CameraTabPanel(settings, printWorkflow, paramsScrollPane, running, this::smartPack, statusBar);
         imageTab = new ImageTabPanel(settings, printWorkflow, paramsScrollPane, running, this::smartPack,
                 () -> tabbedPane().setSelectedIndex(1), statusBar);
-        textTab = new TextPrintPanel(settings, printWorkflow, statusBar);
+        textTab = new TextPrintPanel(settings, printWorkflow, running, statusBar);
 
         tabbedPane = new JTabbedPane();
         tabbedPane.addTab("Webcam", new FlatSVGIcon("icons/camera.svg", 16, 16), cameraTab);

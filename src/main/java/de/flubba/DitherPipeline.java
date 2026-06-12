@@ -3,6 +3,10 @@ package de.flubba;
 import java.awt.image.BufferedImage;
 import java.util.List;
 
+/**
+ * The only public entry to dithering. Stage order and chunking invariants live
+ * behind this interface; {@link Dithering}'s stages are package-private.
+ */
 public final class DitherPipeline {
 
     public static final int PRINTER_LAYERS = 4;

@@ -108,7 +108,8 @@ public class ImageTabPanel extends JPanel {
         add(imageBottomPanel, BorderLayout.SOUTH);
 
         installShortcuts();
-        startDitheringLoop(running);
+        LivePreview.continuous("image-dithering-loop", running, active::get,
+                sourceImagePanel::getCurrentImage, settings, imageDitheredPreview::updateImage);
     }
 
     public void attachSidebar() {
@@ -218,12 +219,4 @@ public class ImageTabPanel extends JPanel {
         }
     }
 
-    private void startDitheringLoop(AtomicBoolean running) {
-        PollingLoop.start("image-dithering-loop", running, active::get, () -> {
-            BufferedImage image = sourceImagePanel.getCurrentImage();
-            if (image != null) {
-                imageDitheredPreview.updateImage(DitherPipeline.preview(image, settings.currentDitherParams()));
-            }
-        });
-    }
 }

@@ -5,7 +5,7 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 
-public class Dithering {
+class Dithering {
 
     // Empirical grayscale levels from printer calibration (epson-multi-tone LUT).
     // Each entry = perceived brightness [0=black, 1=white] that the corresponding printer level produces.
@@ -29,21 +29,21 @@ public class Dithering {
     static final int[] LEVEL_TO_BYTE = {0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176};
 
     // number of histogram bins, histogram resolution (256 matches 8-bit depth)
-    public static final int CLAHE_NUM_BINS = 256;
+    static final int CLAHE_NUM_BINS = 256;
 
     record DitherResult(double[][] ditheredPixels, int[][] mappedBytes) {}
 
-    // --- Public pipeline entry points ---
+    // --- Pipeline entry points (callers go through DitherPipeline) ---
 
-    public static List<BufferedImage> toDitheredChunks(BufferedImage image, DitherParams params) {
+    static List<BufferedImage> toDitheredChunks(BufferedImage image, DitherParams params) {
         return doDitherChunks(image, params, true);
     }
 
-    public static List<BufferedImage> toDitheredChunksPortrait(BufferedImage image, DitherParams params) {
+    static List<BufferedImage> toDitheredChunksPortrait(BufferedImage image, DitherParams params) {
         return doDitherChunks(image, params, false);
     }
 
-    public static BufferedImage toDitheredImage(BufferedImage image, DitherParams params) {
+    static BufferedImage toDitheredImage(BufferedImage image, DitherParams params) {
         var pixels = preprocess(image, params);
         var activeLevels = getActiveLevels(params.grayLevels());
         var result = applyErrorDiffusion(pixels, params, activeLevels, null);
@@ -214,7 +214,7 @@ public class Dithering {
 
     // --- Image conversion ---
 
-    public static int[][] rotate90CW(int[][] matrix) {
+    static int[][] rotate90CW(int[][] matrix) {
         int rows = matrix.length;
         int cols = matrix[0].length;
         int[][] rotated = new int[cols][rows];

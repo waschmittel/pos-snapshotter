@@ -22,9 +22,9 @@ public class WebServer {
     private final SettingsStore settingsStore;
     private final PrintWorkflow printWorkflow;
 
-    public WebServer(int port, SettingsStore settingsStore) throws IOException {
+    public WebServer(int port, SettingsStore settingsStore, Printer printer) throws IOException {
         this.settingsStore = settingsStore;
-        this.printWorkflow = new PrintWorkflow(settingsStore, settingsStore::loadPrinterName);
+        this.printWorkflow = new PrintWorkflow(settingsStore, printer);
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.server.createContext("/", new StaticHandler());
         this.server.createContext("/print", new PrintHandler());
@@ -139,7 +139,7 @@ public class WebServer {
             try {
                 BufferedImage img = HtmlToImageRenderer.render(html, HtmlToImageRenderer.PRINTER_WIDTH);
                 if (img != null) {
-                    var params = settingsStore.loadDitherParams();
+                    var params = settingsStore.currentDitherParams();
                     BufferedImage dithered = DitherPipeline.preview(img, params);
                     
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();

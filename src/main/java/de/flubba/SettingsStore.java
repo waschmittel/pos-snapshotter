@@ -5,6 +5,7 @@ import java.util.prefs.Preferences;
 public class SettingsStore {
     private final Preferences prefs;
     private volatile DitherParams current;
+    private volatile String currentPrinter;
 
     public SettingsStore() {
         this(Preferences.userNodeForPackage(DitherParams.class));
@@ -13,6 +14,7 @@ public class SettingsStore {
     SettingsStore(Preferences prefs) {
         this.prefs = prefs;
         this.current = loadDitherParams();
+        this.currentPrinter = prefs.get("printerName", null);
     }
 
     public DitherParams currentDitherParams() {
@@ -25,7 +27,7 @@ public class SettingsStore {
         saveDitherParams(clamped);
     }
 
-    public DitherParams loadDitherParams() {
+    private DitherParams loadDitherParams() {
         var d = DitherParams.defaults();
         return new DitherParams(
                 DiffusionMatrix.valueOf(prefs.get("diffusionMatrix", d.diffusionMatrix().name())),
@@ -38,7 +40,7 @@ public class SettingsStore {
         );
     }
 
-    public void saveDitherParams(DitherParams params) {
+    private void saveDitherParams(DitherParams params) {
         prefs.put("diffusionMatrix", params.diffusionMatrix().name());
         prefs.putDouble("preDitheringGamma", params.preDitheringGamma());
         prefs.putDouble("sharpness", params.sharpness());
@@ -84,11 +86,12 @@ public class SettingsStore {
         prefs.putInt("lastTab", index);
     }
 
-    public String loadPrinterName() {
-        return prefs.get("printerName", null);
+    public String currentPrinterName() {
+        return currentPrinter;
     }
 
-    public void savePrinterName(String name) {
+    public void updatePrinterName(String name) {
+        currentPrinter = name;
         if (name == null) {
             prefs.remove("printerName");
         } else {

@@ -1,6 +1,7 @@
 package de.flubba;
 
 import javax.swing.JTextPane;
+import javax.swing.SwingUtilities;
 import javax.swing.text.Document;
 import javax.swing.text.View;
 import javax.swing.text.html.HTMLEditorKit;
@@ -9,6 +10,8 @@ import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.lang.reflect.InvocationTargetException;
+import java.util.function.Supplier;
 
 public final class HtmlToImageRenderer {
 
@@ -19,16 +22,38 @@ public final class HtmlToImageRenderer {
 
     public static BufferedImage render(String html, int width) {
         if (html == null || html.isEmpty()) return null;
-        JTextPane pane = newOffscreenPane();
-        pane.setText(html);
-        return paintToImage(pane, width);
+        return onEdt(() -> {
+            JTextPane pane = newOffscreenPane();
+            pane.setText(html);
+            return paintToImage(pane, width);
+        });
     }
 
     public static BufferedImage render(Document document, int width) {
         if (document == null || document.getLength() == 0) return null;
-        JTextPane pane = newOffscreenPane();
-        pane.setDocument(document);
-        return paintToImage(pane, width);
+        return onEdt(() -> {
+            JTextPane pane = newOffscreenPane();
+            pane.setDocument(document);
+            return paintToImage(pane, width);
+        });
+    }
+
+    // Swing components must be touched on the EDT; callers (e.g. web handlers on
+    // virtual threads) should not have to know that.
+    private static BufferedImage onEdt(Supplier<BufferedImage> renderTask) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            return renderTask.get();
+        }
+        var result = new BufferedImage[1];
+        try {
+            SwingUtilities.invokeAndWait(() -> result[0] = renderTask.get());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (InvocationTargetException e) {
+            throw new IllegalStateException("HTML rendering failed", e.getCause());
+        }
+        return result[0];
     }
 
     private static JTextPane newOffscreenPane() {

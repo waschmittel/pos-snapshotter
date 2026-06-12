@@ -2,23 +2,26 @@ package de.flubba;
 
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.util.function.Supplier;
 
 public final class PrintWorkflow {
 
     public static final int PRINTER_WIDTH = 512;
 
     private final SettingsStore settings;
-    private final Supplier<String> printerSupplier;
+    private final Printer printer;
 
-    public PrintWorkflow(SettingsStore settings, Supplier<String> printerSupplier) {
+    public PrintWorkflow(SettingsStore settings, Printer printer) {
         this.settings = settings;
-        this.printerSupplier = printerSupplier;
+        this.printer = printer;
     }
 
     public void print(BufferedImage image, Orientation orientation) throws IOException {
+        String printerName = settings.currentPrinterName();
+        if (printerName == null || printerName.isEmpty()) {
+            throw new IOException("No printer selected");
+        }
         var chunks = DitherPipeline.render(image, orientation, settings.currentDitherParams());
-        PrinterService.print(printerSupplier.get(), chunks);
+        printer.print(printerName, chunks);
     }
 
     public void printFitted(BufferedImage image) throws IOException {

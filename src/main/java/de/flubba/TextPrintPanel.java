@@ -47,13 +47,11 @@ import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 public class TextPrintPanel extends JPanel {
@@ -63,8 +61,9 @@ public class TextPrintPanel extends JPanel {
 
     private final JTextPane editor;
     private final HTMLEditorKit htmlKit = new HTMLEditorKit();
+    private final DocumentStore documents = new DocumentStore(AUTO_SAVE_FILE);
     private final Timer autoSaveTimer;
-    private final Timer previewTimer;
+    private final LivePreview preview;
     private final PreviewPanel previewPanel;
 
     // toolbar controls
@@ -79,7 +78,8 @@ public class TextPrintPanel extends JPanel {
 
     private boolean updatingToolbar = false;
 
-    public TextPrintPanel(SettingsStore settings, PrintWorkflow printWorkflow, StatusBar statusBar) {
+    public TextPrintPanel(SettingsStore settings, PrintWorkflow printWorkflow,
+                          AtomicBoolean running, StatusBar statusBar) {
         this.settings = settings;
         this.printWorkflow = printWorkflow;
         this.statusBar = statusBar;
@@ -225,8 +225,8 @@ public class TextPrintPanel extends JPanel {
         editor.addCaretListener(_ -> updateToolbarState());
 
         // --- Live Preview & Auto-save ---
-        previewTimer = new Timer(1000, _ -> updatePreview());
-        previewTimer.setRepeats(false);
+        preview = LivePreview.debounced("text-preview", running, 1000,
+                this::renderEditorToImage, settings, previewPanel::setImage);
 
         autoSaveTimer = new Timer(2000, _ -> autoSave());
         autoSaveTimer.setRepeats(false);
@@ -250,11 +250,11 @@ public class TextPrintPanel extends JPanel {
 
         // --- Restore last content ---
         loadAutoSaved();
-        updatePreview();
+        preview.pokeNow();
     }
 
     private void restartTimers() {
-        previewTimer.restart();
+        preview.poke();
         autoSaveTimer.restart();
     }
 
@@ -278,16 +278,6 @@ public class TextPrintPanel extends JPanel {
         // Trigger UI sync
         updateToolbarState();
         restartTimers();
-    }
-
-    private void updatePreview() {
-        SwingUtilities.invokeLater(() -> {
-            BufferedImage image = renderEditorToImage();
-            if (image != null) {
-                BufferedImage dithered = DitherPipeline.preview(image, settings.currentDitherParams());
-                previewPanel.setImage(dithered);
-            }
-        });
     }
 
     private void setupShortcuts() {
@@ -439,12 +429,9 @@ public class TextPrintPanel extends JPanel {
     }
 
     private void loadHtmlFile(File file) {
-        try (var fis = new FileInputStream(file)) {
-            editor.setText("");
-            htmlKit.read(fis, editor.getDocument(), 0);
-            if (file != AUTO_SAVE_FILE.toFile()) {
-                statusBar.info("Loaded " + file.getName());
-            }
+        try {
+            documents.load(file, editor.getDocument());
+            statusBar.info("Loaded " + file.getName());
         } catch (Exception e) {
             log.error("Error loading HTML file: {}", file, e);
             statusBar.error("Load failed: " + e.getMessage());
@@ -454,8 +441,8 @@ public class TextPrintPanel extends JPanel {
     }
 
     private void saveHtmlToFile(File file) {
-        try (var fos = new FileOutputStream(file)) {
-            htmlKit.write(fos, editor.getDocument(), 0, editor.getDocument().getLength());
+        try {
+            documents.save(editor.getDocument(), file);
         } catch (Exception e) {
             log.error("Error saving HTML file: {}", file, e);
             statusBar.error("Save failed: " + e.getMessage());
@@ -468,8 +455,7 @@ public class TextPrintPanel extends JPanel {
 
     private void autoSave() {
         try {
-            Files.createDirectories(SAVE_DIR);
-            saveHtmlToFile(AUTO_SAVE_FILE.toFile());
+            documents.autoSave(editor.getDocument());
             log.debug("Auto-saved editor content");
             statusBar.info("Auto-saved");
         } catch (Exception e) {
@@ -478,9 +464,13 @@ public class TextPrintPanel extends JPanel {
     }
 
     private void loadAutoSaved() {
-        if (Files.exists(AUTO_SAVE_FILE)) {
-            loadHtmlFile(AUTO_SAVE_FILE.toFile());
-            log.info("Restored editor content from auto-save");
+        try {
+            if (documents.restoreAutoSaved(editor.getDocument())) {
+                log.info("Restored editor content from auto-save");
+            }
+        } catch (Exception e) {
+            log.error("Could not restore auto-saved content", e);
+            statusBar.error("Could not restore last document: " + e.getMessage());
         }
     }
 
@@ -489,7 +479,6 @@ public class TextPrintPanel extends JPanel {
      */
     public void saveBeforeShutdown() {
         autoSaveTimer.stop();
-        previewTimer.stop();
         autoSave();
     }
 

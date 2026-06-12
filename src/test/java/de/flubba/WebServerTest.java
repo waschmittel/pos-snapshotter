@@ -19,12 +19,15 @@ class WebServerTest {
     private HttpClient client;
     private final int testPort = 8081;
     private Preferences tempPrefs;
+    private SettingsStore settingsStore;
+    private RecordingPrinter printer;
 
     @BeforeEach
     void setUp() throws IOException {
         tempPrefs = Preferences.userRoot().node("PosSnapshotterTest");
-        SettingsStore settingsStore = new SettingsStore(tempPrefs);
-        webServer = new WebServer(testPort, settingsStore);
+        settingsStore = new SettingsStore(tempPrefs);
+        printer = new RecordingPrinter();
+        webServer = new WebServer(testPort, settingsStore, printer);
         webServer.start();
         client = HttpClient.newHttpClient();
     }
@@ -75,6 +78,36 @@ class WebServerTest {
 
         assertThat(response.statusCode()).isEqualTo(200);
         assertThat(response.body()).contains("<title>POS Snapshotter - Web</title>");
+    }
+
+    @Test
+    void testPrintEndpoint_sendsJobToPrinter() throws IOException, InterruptedException {
+        settingsStore.updatePrinterName("EPSON TM-T88VII");
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + testPort + "/print"))
+                .POST(HttpRequest.BodyPublishers.ofString("<h1>Receipt</h1>"))
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(printer.lastPrinterName).isEqualTo("EPSON TM-T88VII");
+        assertThat(printer.jobs).hasSize(1);
+        assertThat(printer.jobs.getFirst()).isNotEmpty();
+    }
+
+    @Test
+    void testPrintEndpoint_noPrinterSelected_returns500() throws IOException, InterruptedException {
+        settingsStore.updatePrinterName(null);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + testPort + "/print"))
+                .POST(HttpRequest.BodyPublishers.ofString("<h1>Receipt</h1>"))
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(500);
+        assertThat(printer.jobs).isEmpty();
     }
 
     @Test
