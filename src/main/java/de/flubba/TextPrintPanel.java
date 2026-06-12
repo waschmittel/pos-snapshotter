@@ -13,12 +13,14 @@ import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSeparator;
 import javax.swing.JSpinner;
 import javax.swing.JSplitPane;
 import javax.swing.JTextPane;
 import javax.swing.JToggleButton;
 import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.event.ChangeEvent;
@@ -39,34 +41,29 @@ import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.Frame;
 import java.awt.Graphics;
-import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
-import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 public class TextPrintPanel extends JPanel {
     private static final Path SAVE_DIR = Path.of(System.getProperty("user.home"), ".posSnapshotter");
     private static final Path AUTO_SAVE_FILE = SAVE_DIR.resolve("lastDocument.html");
-    private static final int PRINTER_WIDTH = 512;
+    private static final int PRINTER_WIDTH = HtmlToImageRenderer.PRINTER_WIDTH;
 
     private final JTextPane editor;
     private final HTMLEditorKit htmlKit = new HTMLEditorKit();
+    private final DocumentStore documents = new DocumentStore(AUTO_SAVE_FILE);
     private final Timer autoSaveTimer;
-    private final Timer previewTimer;
+    private final LivePreview preview;
     private final PreviewPanel previewPanel;
 
     // toolbar controls
@@ -75,14 +72,17 @@ public class TextPrintPanel extends JPanel {
     private final JToggleButton underlineButton;
     private final JSpinner fontSizeSpinner;
     private final JComboBox<String> fontFamilyCombo;
-    private final AtomicReference<DitherParams> currentParams;
-    private final Supplier<String> printerSupplier;
+    private final SettingsStore settings;
+    private final PrintWorkflow printWorkflow;
+    private final StatusBar statusBar;
 
     private boolean updatingToolbar = false;
 
-    public TextPrintPanel(AtomicReference<DitherParams> currentParams, Supplier<String> printerSupplier) {
-        this.currentParams = currentParams;
-        this.printerSupplier = printerSupplier;
+    public TextPrintPanel(SettingsStore settings, PrintWorkflow printWorkflow,
+                          AtomicBoolean running, StatusBar statusBar) {
+        this.settings = settings;
+        this.printWorkflow = printWorkflow;
+        this.statusBar = statusBar;
         setLayout(new BorderLayout());
 
         editor = new JTextPane();
@@ -166,12 +166,8 @@ public class TextPrintPanel extends JPanel {
             }
         });
 
-        JButton printButton = new JButton("Print", new FlatSVGIcon("icons/print.svg", 16, 16));
-        printButton.setFont(new Font("SansSerif", Font.BOLD, 14));
-        printButton.setBackground(new Color(0, 120, 215));
-        printButton.setForeground(Color.WHITE);
-        printButton.setOpaque(true);
-        printButton.setBorderPainted(false);
+        JButton printButton = UiTheme.primarySmall("Print", "icons/print.svg");
+        printButton.setToolTipText("Print document (Ctrl+P)");
         printButton.setFocusable(false);
         printButton.addActionListener(_ -> printText());
 
@@ -190,15 +186,19 @@ public class TextPrintPanel extends JPanel {
         toolbar.add(boldButton);
         toolbar.add(italicButton);
         toolbar.add(underlineButton);
+        toolbar.add(toolbarSeparator());
         toolbar.add(fontSizeSpinner);
         toolbar.add(fontFamilyCombo);
+        toolbar.add(toolbarSeparator());
         toolbar.add(alignLeftButton);
         toolbar.add(alignCenterButton);
         toolbar.add(alignRightButton);
         toolbar.add(alignJustifyButton);
+        toolbar.add(toolbarSeparator());
         toolbar.add(resetContentsButton);
         toolbar.add(openButton);
         toolbar.add(saveButton);
+        toolbar.add(toolbarSeparator());
         toolbar.add(printButton);
 
         JScrollPane editorScrollPane = new JScrollPane(editor);
@@ -225,8 +225,8 @@ public class TextPrintPanel extends JPanel {
         editor.addCaretListener(_ -> updateToolbarState());
 
         // --- Live Preview & Auto-save ---
-        previewTimer = new Timer(1000, _ -> updatePreview());
-        previewTimer.setRepeats(false);
+        preview = LivePreview.debounced("text-preview", running, 1000,
+                this::renderEditorToImage, settings, previewPanel::setImage);
 
         autoSaveTimer = new Timer(2000, _ -> autoSave());
         autoSaveTimer.setRepeats(false);
@@ -250,12 +250,18 @@ public class TextPrintPanel extends JPanel {
 
         // --- Restore last content ---
         loadAutoSaved();
-        updatePreview();
+        preview.pokeNow();
     }
 
     private void restartTimers() {
-        previewTimer.restart();
+        preview.poke();
         autoSaveTimer.restart();
+    }
+
+    private static JSeparator toolbarSeparator() {
+        JSeparator sep = new JSeparator(SwingConstants.VERTICAL);
+        sep.setPreferredSize(new Dimension(2, 24));
+        return sep;
     }
 
     private void resetDocument() {
@@ -272,16 +278,6 @@ public class TextPrintPanel extends JPanel {
         // Trigger UI sync
         updateToolbarState();
         restartTimers();
-    }
-
-    private void updatePreview() {
-        SwingUtilities.invokeLater(() -> {
-            BufferedImage image = renderEditorToImage();
-            if (image != null) {
-                BufferedImage dithered = Dithering.toDitheredImage(image, currentParams.get());
-                previewPanel.setImage(dithered);
-            }
-        });
     }
 
     private void setupShortcuts() {
@@ -383,41 +379,22 @@ public class TextPrintPanel extends JPanel {
     private void printText() {
         try {
             BufferedImage image = renderEditorToImage();
-            if (image == null) return;
-            var chunks = Dithering.toDitheredChunksPortrait(image, currentParams.get());
-            PrinterService.print(printerSupplier.get(), chunks);
+            if (image == null) {
+                statusBar.info("Nothing to print");
+                return;
+            }
+            printWorkflow.print(image, Orientation.PORTRAIT);
+            statusBar.success("Document sent to printer");
         } catch (IOException e) {
             log.error("Error printing text", e);
+            statusBar.error("Print failed: " + e.getMessage());
             JOptionPane.showMessageDialog(this, "Print error: " + e.getMessage(),
                     "Print Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
     private BufferedImage renderEditorToImage() {
-        if (editor.getDocument().getLength() == 0) return null;
-
-        // Create offscreen editor at printer width
-        JTextPane offscreen = new JTextPane();
-        offscreen.setEditorKit(htmlKit);
-        offscreen.setDocument(editor.getDocument());
-        offscreen.setSize(PRINTER_WIDTH, 10000); // large enough height
-
-        // Force layout of views
-        var ui = offscreen.getUI();
-        var rootView = ui.getRootView(offscreen);
-        rootView.setSize(PRINTER_WIDTH, 10000);
-        int height = (int) rootView.getPreferredSpan(javax.swing.text.View.Y_AXIS);
-        offscreen.setSize(PRINTER_WIDTH, height);
-
-        BufferedImage img = new BufferedImage(PRINTER_WIDTH, height, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g2 = img.createGraphics();
-        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g2.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
-        g2.setColor(Color.WHITE);
-        g2.fillRect(0, 0, PRINTER_WIDTH, height);
-        offscreen.paint(g2);
-        g2.dispose();
-        return img;
+        return HtmlToImageRenderer.render(editor.getDocument(), PRINTER_WIDTH);
     }
 
     // --- File I/O ---
@@ -452,21 +429,23 @@ public class TextPrintPanel extends JPanel {
     }
 
     private void loadHtmlFile(File file) {
-        try (var fis = new FileInputStream(file)) {
-            editor.setText("");
-            htmlKit.read(fis, editor.getDocument(), 0);
+        try {
+            documents.load(file, editor.getDocument());
+            statusBar.info("Loaded " + file.getName());
         } catch (Exception e) {
             log.error("Error loading HTML file: {}", file, e);
+            statusBar.error("Load failed: " + e.getMessage());
             JOptionPane.showMessageDialog(this, "Error loading file: " + e.getMessage(),
                     "Load Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
     private void saveHtmlToFile(File file) {
-        try (var fos = new FileOutputStream(file)) {
-            htmlKit.write(fos, editor.getDocument(), 0, editor.getDocument().getLength());
+        try {
+            documents.save(editor.getDocument(), file);
         } catch (Exception e) {
             log.error("Error saving HTML file: {}", file, e);
+            statusBar.error("Save failed: " + e.getMessage());
             JOptionPane.showMessageDialog(this, "Error saving file: " + e.getMessage(),
                     "Save Error", JOptionPane.ERROR_MESSAGE);
         }
@@ -476,18 +455,22 @@ public class TextPrintPanel extends JPanel {
 
     private void autoSave() {
         try {
-            Files.createDirectories(SAVE_DIR);
-            saveHtmlToFile(AUTO_SAVE_FILE.toFile());
+            documents.autoSave(editor.getDocument());
             log.debug("Auto-saved editor content");
+            statusBar.info("Auto-saved");
         } catch (Exception e) {
             log.warn("Auto-save failed", e);
         }
     }
 
     private void loadAutoSaved() {
-        if (Files.exists(AUTO_SAVE_FILE)) {
-            loadHtmlFile(AUTO_SAVE_FILE.toFile());
-            log.info("Restored editor content from auto-save");
+        try {
+            if (documents.restoreAutoSaved(editor.getDocument())) {
+                log.info("Restored editor content from auto-save");
+            }
+        } catch (Exception e) {
+            log.error("Could not restore auto-saved content", e);
+            statusBar.error("Could not restore last document: " + e.getMessage());
         }
     }
 
@@ -496,7 +479,6 @@ public class TextPrintPanel extends JPanel {
      */
     public void saveBeforeShutdown() {
         autoSaveTimer.stop();
-        previewTimer.stop();
         autoSave();
     }
 

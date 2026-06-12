@@ -27,26 +27,65 @@ class SettingsStoreTest {
 
     @Test
     void loadFromEmptyPrefs_returnsDefaults() {
-        DitherParams result = store.loadDitherParams();
+        DitherParams result = store.currentDitherParams();
         DitherParams defaults = DitherParams.defaults();
         assertThat(result).isEqualTo(defaults);
     }
 
     @Test
-    void saveThenLoad_roundTrip() {
+    void updateThenRead_returnsUpdatedParams() {
         var custom = new DitherParams(DiffusionMatrix.FLOYD_STEINBERG, 1.5, 2.0, 1.5, 8, 10, 3.0);
-        store.saveDitherParams(custom);
-        DitherParams loaded = store.loadDitherParams();
-        assertThat(loaded).isEqualTo(custom);
+        store.updateDitherParams(custom);
+        assertThat(store.currentDitherParams()).isEqualTo(custom);
     }
 
     @Test
-    void resetThenLoad_returnsDefaults() {
+    void update_persistsAcrossInstances() {
+        var custom = new DitherParams(DiffusionMatrix.FLOYD_STEINBERG, 1.5, 2.0, 1.5, 8, 10, 3.0);
+        store.updateDitherParams(custom);
+        var reopened = new SettingsStore(testPrefs);
+        assertThat(reopened.currentDitherParams()).isEqualTo(custom);
+    }
+
+    @Test
+    void update_clampsOutOfRangeValues() {
+        var outOfRange = new DitherParams(DiffusionMatrix.FLOYD_STEINBERG, 99.0, -1.0, 0.0, 100, 0, 99.0);
+        store.updateDitherParams(outOfRange);
+        assertThat(store.currentDitherParams()).isEqualTo(outOfRange.clamped());
+    }
+
+    @Test
+    void resetThenRead_returnsDefaults() {
         var custom = new DitherParams(DiffusionMatrix.JARVIS_JUDICE_NINKE, 2.0, 1.0, 2.0, 6, 3, 5.0);
-        store.saveDitherParams(custom);
+        store.updateDitherParams(custom);
         store.resetDitherParams();
-        DitherParams loaded = store.loadDitherParams();
-        assertThat(loaded).isEqualTo(DitherParams.defaults());
+        assertThat(store.currentDitherParams()).isEqualTo(DitherParams.defaults());
+        assertThat(new SettingsStore(testPrefs).currentDitherParams()).isEqualTo(DitherParams.defaults());
+    }
+
+    @Test
+    void printerName_defaultIsNull() {
+        assertThat(store.currentPrinterName()).isNull();
+    }
+
+    @Test
+    void printerName_updateThenRead() {
+        store.updatePrinterName("EPSON TM-T88VII");
+        assertThat(store.currentPrinterName()).isEqualTo("EPSON TM-T88VII");
+    }
+
+    @Test
+    void printerName_persistsAcrossInstances() {
+        store.updatePrinterName("EPSON TM-T88VII");
+        assertThat(new SettingsStore(testPrefs).currentPrinterName()).isEqualTo("EPSON TM-T88VII");
+    }
+
+    @Test
+    void printerName_updateToNull_clears() {
+        store.updatePrinterName("EPSON TM-T88VII");
+        store.updatePrinterName(null);
+        assertThat(store.currentPrinterName()).isNull();
+        assertThat(new SettingsStore(testPrefs).currentPrinterName()).isNull();
     }
 
     @Test
@@ -91,12 +130,11 @@ class SettingsStoreTest {
     }
 
     @Test
-    void saveThenLoad_allDiffusionMatrices() {
+    void updateThenRead_allDiffusionMatrices() {
         for (DiffusionMatrix matrix : DiffusionMatrix.values()) {
             var params = new DitherParams(matrix, 0.8, 3.0, 1.0, 12, 5, 1.0);
-            store.saveDitherParams(params);
-            DitherParams loaded = store.loadDitherParams();
-            assertThat(loaded.diffusionMatrix()).isEqualTo(matrix);
+            store.updateDitherParams(params);
+            assertThat(new SettingsStore(testPrefs).currentDitherParams().diffusionMatrix()).isEqualTo(matrix);
         }
     }
 }

@@ -13,10 +13,11 @@ public class Main {
         }
 
         SettingsStore settingsStore = new SettingsStore();
+        Printer printer = new EscPosPrinter();
 
         if (enableServer) {
             try {
-                new WebServer(8080, settingsStore).start();
+                new WebServer(8080, settingsStore, printer).start();
             } catch (Exception e) {
                 System.err.println("Failed to start web server: " + e.getMessage());
             }
@@ -32,7 +33,7 @@ public class Main {
 
         javax.swing.SwingUtilities.invokeLater(() -> {
             try {
-                var frame = new SnapshotterFrame();
+                var frame = new SnapshotterFrame(settingsStore, printer);
                 frame.setVisible(true);
             } catch (Exception e) {
                 throw new RuntimeException("Failed to start application", e);
