@@ -8,7 +8,13 @@ import org.bytedeco.javacv.OpenCVFrameGrabber;
 
 import java.awt.Dimension;
 import java.awt.image.BufferedImage;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStreamReader;
+import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -111,32 +117,103 @@ public final class Camera implements AutoCloseable {
     }
 
     public static String[] detectCameraNames() {
+        List<String> detected = new ArrayList<>();
+        String os = System.getProperty("os.name", "").toLowerCase();
         try {
-            var process = new ProcessBuilder("system_profiler", "SPCameraDataType", "-json")
-                    .redirectErrorStream(true).start();
-            var output = new String(process.getInputStream().readAllBytes());
-            process.waitFor();
-
-            var names = new ArrayList<String>();
-            int searchFrom = 0;
-            while (true) {
-                int nameKeyPos = output.indexOf("\"_name\"", searchFrom);
-                if (nameKeyPos < 0) break;
-                int colonPos = output.indexOf(":", nameKeyPos);
-                int quoteStart = output.indexOf("\"", colonPos + 1);
-                int quoteEnd = output.indexOf("\"", quoteStart + 1);
-                if (quoteStart >= 0 && quoteEnd > quoteStart) {
-                    names.add(output.substring(quoteStart + 1, quoteEnd));
-                }
-                searchFrom = quoteEnd + 1;
-            }
-
-            if (!names.isEmpty()) {
-                return names.toArray(String[]::new);
+            if (os.contains("mac")) {
+                detected = detectMacCameras();
+            } else if (os.contains("win")) {
+                detected = detectWindowsCameras();
+            } else if (os.contains("nux") || os.contains("nix")) {
+                detected = detectLinuxCameras();
             }
         } catch (Exception e) {
             log.warn("Could not detect camera names", e);
         }
-        return new String[]{"Camera 0", "Camera 1", "Camera 2", "Camera 3"};
+
+        if (!detected.isEmpty()) {
+            return detected.toArray(String[]::new);
+        }
+        return new String[]{"No camera found"};
+    }
+
+    private static List<String> detectMacCameras() throws Exception {
+        var process = new ProcessBuilder("system_profiler", "SPCameraDataType", "-json")
+                .redirectErrorStream(true).start();
+        var output = new String(process.getInputStream().readAllBytes());
+        process.waitFor();
+
+        var names = new ArrayList<String>();
+        int searchFrom = 0;
+        while (true) {
+            int nameKeyPos = output.indexOf("\"_name\"", searchFrom);
+            if (nameKeyPos < 0) break;
+            int colonPos = output.indexOf(":", nameKeyPos);
+            int quoteStart = output.indexOf("\"", colonPos + 1);
+            int quoteEnd = output.indexOf("\"", quoteStart + 1);
+            if (quoteStart >= 0 && quoteEnd > quoteStart) {
+                String name = output.substring(quoteStart + 1, quoteEnd);
+                if (!name.isBlank()) {
+                    names.add(name);
+                }
+            }
+            searchFrom = quoteEnd + 1;
+        }
+        return names;
+    }
+
+    private static List<String> detectWindowsCameras() throws Exception {
+        var names = new ArrayList<String>();
+        var pb = new ProcessBuilder("powershell", "-NoProfile", "-Command",
+                "Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -eq 'Camera' -or $_.PNPClass -eq 'Image' } | Select-Object -ExpandProperty Name");
+        pb.redirectErrorStream(true);
+        var process = pb.start();
+        try (var reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (!line.isEmpty()) {
+                    names.add(line);
+                }
+            }
+        }
+        process.waitFor();
+        return names;
+    }
+
+    private static List<String> detectLinuxCameras() {
+        var names = new ArrayList<String>();
+        File v4lDir = new File("/sys/class/video4linux");
+        if (v4lDir.exists() && v4lDir.isDirectory()) {
+            File[] files = v4lDir.listFiles((dir, name) -> name.startsWith("video"));
+            if (files != null) {
+                Arrays.sort(files, (a, b) -> {
+                    int numA = extractVideoNum(a.getName());
+                    int numB = extractVideoNum(b.getName());
+                    return Integer.compare(numA, numB);
+                });
+                for (File dev : files) {
+                    File nameFile = new File(dev, "name");
+                    if (nameFile.exists()) {
+                        try {
+                            String name = Files.readString(nameFile.toPath()).trim();
+                            if (!name.isEmpty()) {
+                                names.add(name);
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+        }
+        return names;
+    }
+
+    private static int extractVideoNum(String name) {
+        try {
+            return Integer.parseInt(name.replaceAll("\\D+", ""));
+        } catch (NumberFormatException e) {
+            return Integer.MAX_VALUE;
+        }
     }
 }
